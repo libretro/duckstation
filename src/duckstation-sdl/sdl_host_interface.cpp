@@ -30,6 +30,7 @@ Log_SetChannel(SDLHostInterface);
 
 #ifdef WIN32
 #include "frontend-common/d3d11_host_display.h"
+#include "frontend-common/d3d12_host_display.h"
 #endif
 
 SDLHostInterface::SDLHostInterface()
@@ -124,6 +125,10 @@ bool SDLHostInterface::CreateDisplay()
       break;
 
 #ifdef WIN32
+    case GPURenderer::HardwareD3D12:
+      display = std::make_unique<FrontendCommon::D3D12HostDisplay>();
+      break;
+
     case GPURenderer::HardwareD3D11:
     default:
       display = std::make_unique<FrontendCommon::D3D11HostDisplay>();
@@ -144,6 +149,7 @@ bool SDLHostInterface::CreateDisplay()
   {
 #ifdef WIN32
     case HostDisplay::RenderAPI::D3D11:
+    case HostDisplay::RenderAPI::D3D12:
       imgui_result = ImGui_ImplSDL2_InitForD3D(m_window);
       break;
 #endif

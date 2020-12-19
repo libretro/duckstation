@@ -23,6 +23,8 @@
     <ClCompile Include="postprocessing_shadergen.cpp" />
     <ClCompile Include="postprocessing_chain.cpp" />
     <ClCompile Include="cubeb_audio_stream.cpp" />
+    <ClCompile Include="d3d12_host_display.cpp" />
+    <ClCompile Include="imgui_impl_dx12.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="icon.h" />
@@ -47,6 +49,8 @@
     <ClInclude Include="postprocessing_shadergen.h" />
     <ClInclude Include="postprocessing_chain.h" />
     <ClInclude Include="cubeb_audio_stream.h" />
+    <ClInclude Include="d3d12_host_display.h" />
+    <ClInclude Include="imgui_impl_dx12.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="font_roboto_regular.inl" />

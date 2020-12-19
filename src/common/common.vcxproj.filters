@@ -104,6 +104,27 @@
     <ClInclude Include="shiftjis.h" />
     <ClInclude Include="memory_arena.h" />
     <ClInclude Include="page_fault_handler.h" />
+    <ClInclude Include="d3d12\staging_texture.h">
+      <Filter>d3d12</Filter>
+    </ClInclude>
+    <ClInclude Include="d3d12\stream_buffer.h">
+      <Filter>d3d12</Filter>
+    </ClInclude>
+    <ClInclude Include="d3d12\texture.h">
+      <Filter>d3d12</Filter>
+    </ClInclude>
+    <ClInclude Include="d3d12\context.h">
+      <Filter>d3d12</Filter>
+    </ClInclude>
+    <ClInclude Include="d3d12\descriptor_allocator.h">
+      <Filter>d3d12</Filter>
+    </ClInclude>
+    <ClInclude Include="d3d12\descriptor_heap_manager.h">
+      <Filter>d3d12</Filter>
+    </ClInclude>
+    <ClInclude Include="d3d12\util.h">
+      <Filter>d3d12</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="jit_code_buffer.cpp" />
@@ -200,6 +221,27 @@
     <ClCompile Include="shiftjis.cpp" />
     <ClCompile Include="memory_arena.cpp" />
     <ClCompile Include="page_fault_handler.cpp" />
+    <ClCompile Include="d3d12\staging_texture.cpp">
+      <Filter>d3d12</Filter>
+    </ClCompile>
+    <ClCompile Include="d3d12\stream_buffer.cpp">
+      <Filter>d3d12</Filter>
+    </ClCompile>
+    <ClCompile Include="d3d12\texture.cpp">
+      <Filter>d3d12</Filter>
+    </ClCompile>
+    <ClCompile Include="d3d12\context.cpp">
+      <Filter>d3d12</Filter>
+    </ClCompile>
+    <ClCompile Include="d3d12\descriptor_heap_manager.cpp">
+      <Filter>d3d12</Filter>
+    </ClCompile>
+    <ClCompile Include="d3d12\descriptor_allocator.cpp">
+      <Filter>d3d12</Filter>
+    </ClCompile>
+    <ClCompile Include="d3d12\util.cpp">
+      <Filter>d3d12</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="bitfield.natvis" />
@@ -213,6 +255,9 @@
     </Filter>
     <Filter Include="vulkan">
       <UniqueIdentifier>{642ff5eb-af39-4aab-a42f-6eb8188a11d7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="d3d12">
+      <UniqueIdentifier>{358e11c4-34af-4169-9a66-ec66342a6a2f}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>
