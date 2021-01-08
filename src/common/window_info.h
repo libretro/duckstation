@@ -12,6 +12,7 @@ struct WindowInfo
     Wayland,
     MacOS,
     Android,
+    Libretro,
   };
 
   enum class SurfaceFormat

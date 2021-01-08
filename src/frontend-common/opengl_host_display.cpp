@@ -9,7 +9,7 @@
 #include "imgui_impl_opengl3.h"
 #endif
 #include "postprocessing_shadergen.h"
-Log_SetChannel(OpenGLHostDisplay);
+Log_SetChannel(LibretroOpenGLHostDisplay);
 
 namespace FrontendCommon {
 

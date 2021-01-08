@@ -20,6 +20,7 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14.0" CACHE STRING "")
 if(NOT ANDROID)
   option(BUILD_SDL_FRONTEND "Build the SDL frontend" ON)
   option(BUILD_QT_FRONTEND "Build the Qt frontend" ON)
+  option(BUILD_LIBRETRO_CORE "Build a libretro core" OFF)
   option(ENABLE_DISCORD_PRESENCE "Build with Discord Rich Presence support" ON)
   option(USE_SDL2 "Link with SDL2 for controller support" ON)
 endif()
@@ -41,7 +42,8 @@ if(USE_WAYLAND)
   set(USE_EGL ON)
 endif()
 
-if(ANDROID)
+# When we're building for libretro, everything else is invalid because of PIC.
+if(ANDROID OR BUILD_LIBRETRO_CORE)
   if(BUILD_SDL_FRONTEND)
     message(WARNING "Building for Android or libretro core, disabling SDL frontend")
     set(BUILD_SDL_FRONTEND OFF)
@@ -64,8 +66,13 @@ if(ANDROID)
   if(USE_WAYLAND)
     set(USE_WAYLAND OFF)
   endif()
-  if(USE_EGL)
+  if(BUILD_LIBRETRO_CORE AND USE_EGL)
     set(USE_EGL OFF)
+  endif()
+
+  # Force PIC when compiling a libretro core.
+  if(BUILD_LIBRETRO_CORE)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   endif()
 endif()
 
@@ -204,7 +211,7 @@ endif()
 
 
 # Write binaries to a seperate directory.
-if(WIN32)
+if(WIN32 AND NOT BUILD_LIBRETRO_CORE)
   # For Windows, use the source directory, except for libretro.
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin/${CPU_ARCH}")
 else()
@@ -225,6 +232,6 @@ enable_testing()
 add_subdirectory(dep)
 add_subdirectory(src)
 
-if(ANDROID)
+if(ANDROID AND NOT BUILD_LIBRETRO_CORE)
   add_subdirectory(android/app/src/cpp)
 endif()
