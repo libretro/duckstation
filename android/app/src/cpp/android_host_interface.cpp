@@ -1,4 +1,5 @@
 #include "android_host_interface.h"
+#include "android_controller_interface.h"
 #include "android_progress_callback.h"
 #include "common/assert.h"
 #include "common/audio_stream.h"
@@ -45,6 +46,8 @@ static jmethodID s_EmulationActivity_method_onGameTitleChanged;
 static jmethodID s_EmulationActivity_method_setVibration;
 static jclass s_PatchCode_class;
 static jmethodID s_PatchCode_constructor;
+static jclass s_GameListEntry_class;
+static jmethodID s_GameListEntry_constructor;
 
 namespace AndroidHelpers {
 // helper for retrieving the current per-thread jni environment
@@ -79,6 +82,11 @@ std::string JStringToString(JNIEnv* env, jstring str)
   env->ReleaseStringUTFChars(str, data);
 
   return ret;
+}
+
+jclass GetStringClass()
+{
+  return s_String_class;
 }
 
 std::unique_ptr<GrowableMemoryByteStream> ReadInputStreamToMemory(JNIEnv* env, jobject obj, u32 chunk_size /* = 65536*/)
@@ -366,6 +374,10 @@ void AndroidHostInterface::EmulationThreadEntryPoint(jobject emulation_activity,
   EmulationThreadLoop();
 
   thread_env->CallVoidMethod(m_emulation_activity_object, s_EmulationActivity_method_onEmulationStopped);
+
+  if (g_settings.save_state_on_exit)
+    SaveResumeSaveState();
+
   PowerOffSystem();
   DestroyImGuiContext();
   thread_env->DeleteGlobalRef(m_emulation_activity_object);
@@ -459,8 +471,9 @@ bool AndroidHostInterface::AcquireHostDisplay()
       break;
   }
 
-  if (!display->CreateRenderDevice(wi, {}, g_settings.gpu_use_debug_device) ||
-      !display->InitializeRenderDevice(GetShaderCacheBasePath(), g_settings.gpu_use_debug_device))
+  if (!display->CreateRenderDevice(wi, {}, g_settings.gpu_use_debug_device, g_settings.gpu_threaded_presentation) ||
+      !display->InitializeRenderDevice(GetShaderCacheBasePath(), g_settings.gpu_use_debug_device,
+                                       g_settings.gpu_threaded_presentation))
   {
     ReportError("Failed to acquire host display.");
     display->DestroyRenderDevice();
@@ -495,6 +508,26 @@ std::unique_ptr<AudioStream> AndroidHostInterface::CreateAudioStream(AudioBacken
 #endif
 
   return CommonHostInterface::CreateAudioStream(backend);
+}
+
+void AndroidHostInterface::UpdateControllerInterface()
+{
+  if (m_controller_interface)
+  {
+    m_controller_interface->Shutdown();
+    m_controller_interface.reset();
+  }
+
+  m_controller_interface = std::make_unique<AndroidControllerInterface>();
+  if (!m_controller_interface || !m_controller_interface->Initialize(this))
+  {
+    Log_WarningPrintf("Failed to initialize controller interface, bindings are not possible.");
+    if (m_controller_interface)
+    {
+      m_controller_interface->Shutdown();
+      m_controller_interface.reset();
+    }
+  }
 }
 
 void AndroidHostInterface::OnSystemPaused(bool paused)
@@ -631,6 +664,30 @@ void AndroidHostInterface::SetControllerAxisState(u32 index, s32 button_code, fl
     false);
 }
 
+void AndroidHostInterface::HandleControllerButtonEvent(u32 controller_index, u32 button_index, bool pressed)
+{
+  if (!IsEmulationThreadRunning())
+    return;
+
+  RunOnEmulationThread([this, controller_index, button_index, pressed]() {
+    AndroidControllerInterface* ci = static_cast<AndroidControllerInterface*>(m_controller_interface.get());
+    if (ci)
+      ci->HandleButtonEvent(controller_index, button_index, pressed);
+  });
+}
+
+void AndroidHostInterface::HandleControllerAxisEvent(u32 controller_index, u32 axis_index, float value)
+{
+  if (!IsEmulationThreadRunning())
+    return;
+
+  RunOnEmulationThread([this, controller_index, axis_index, value]() {
+    AndroidControllerInterface* ci = static_cast<AndroidControllerInterface*>(m_controller_interface.get());
+    if (ci)
+      ci->HandleAxisEvent(controller_index, axis_index, value);
+  });
+}
+
 void AndroidHostInterface::SetFastForwardEnabled(bool enabled)
 {
   m_fast_forward_enabled = enabled;
@@ -650,6 +707,7 @@ void AndroidHostInterface::ApplySettings(bool display_osd_messages)
   LoadAndConvertSettings();
   CommonHostInterface::ApplyGameSettings(display_osd_messages);
   CommonHostInterface::FixIncompatibleSettings(display_osd_messages);
+  UpdateInputMap();
 
   // Defer renderer changes, the app really doesn't like it.
   if (System::IsValid() && g_settings.gpu_renderer != old_settings.gpu_renderer)
@@ -737,6 +795,45 @@ void AndroidHostInterface::UpdateVibration()
   SetVibration(vibration_state);
 }
 
+jobjectArray AndroidHostInterface::GetInputProfileNames(JNIEnv* env) const
+{
+  const InputProfileList profile_list(GetInputProfileList());
+  if (profile_list.empty())
+    return nullptr;
+
+  jobjectArray name_array = env->NewObjectArray(static_cast<u32>(profile_list.size()), s_String_class, nullptr);
+  u32 name_array_index = 0;
+  Assert(name_array != nullptr);
+  for (const InputProfileEntry& e : profile_list)
+  {
+    jstring axis_name_jstr = env->NewStringUTF(e.name.c_str());
+    env->SetObjectArrayElement(name_array, name_array_index++, axis_name_jstr);
+    env->DeleteLocalRef(axis_name_jstr);
+  }
+
+  return name_array;
+}
+
+bool AndroidHostInterface::ApplyInputProfile(const char* profile_name)
+{
+  const std::string path(GetInputProfilePath(profile_name));
+  if (path.empty())
+    return false;
+
+  Assert(!IsEmulationThreadRunning() || IsEmulationThreadPaused());
+  CommonHostInterface::ApplyInputProfile(path.c_str(), m_settings_interface);
+  return true;
+}
+
+bool AndroidHostInterface::SaveInputProfile(const char* profile_name)
+{
+  const std::string path(GetSavePathForInputProfile(profile_name));
+  if (path.empty())
+    return false;
+
+  return CommonHostInterface::SaveInputProfile(path.c_str(), m_settings_interface);
+}
+
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved)
 {
   Log::SetDebugOutputParams(true, nullptr, LOGLEVEL_DEV);
@@ -744,13 +841,15 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved)
 
   // Create global reference so it doesn't get cleaned up.
   JNIEnv* env = AndroidHelpers::GetJNIEnv();
-  jclass string_class, host_interface_class, patch_code_class;
+  jclass string_class, host_interface_class, patch_code_class, game_list_entry_class;
   if ((string_class = env->FindClass("java/lang/String")) == nullptr ||
       (s_String_class = static_cast<jclass>(env->NewGlobalRef(string_class))) == nullptr ||
       (host_interface_class = env->FindClass("com/github/stenzek/duckstation/AndroidHostInterface")) == nullptr ||
       (s_AndroidHostInterface_class = static_cast<jclass>(env->NewGlobalRef(host_interface_class))) == nullptr ||
       (patch_code_class = env->FindClass("com/github/stenzek/duckstation/PatchCode")) == nullptr ||
-      (s_PatchCode_class = static_cast<jclass>(env->NewGlobalRef(patch_code_class))) == nullptr)
+      (s_PatchCode_class = static_cast<jclass>(env->NewGlobalRef(patch_code_class))) == nullptr ||
+      (game_list_entry_class = env->FindClass("com/github/stenzek/duckstation/GameListEntry")) == nullptr ||
+      (s_GameListEntry_class = static_cast<jclass>(env->NewGlobalRef(game_list_entry_class))) == nullptr)
   {
     Log_ErrorPrint("AndroidHostInterface class lookup failed");
     return -1;
@@ -759,6 +858,7 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved)
   env->DeleteLocalRef(string_class);
   env->DeleteLocalRef(host_interface_class);
   env->DeleteLocalRef(patch_code_class);
+  env->DeleteLocalRef(game_list_entry_class);
 
   jclass emulation_activity_class;
   if ((s_AndroidHostInterface_constructor =
@@ -785,7 +885,11 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved)
          env->GetMethodID(s_EmulationActivity_class, "onGameTitleChanged", "(Ljava/lang/String;)V")) == nullptr ||
       (s_EmulationActivity_method_setVibration = env->GetMethodID(emulation_activity_class, "setVibration", "(Z)V")) ==
         nullptr ||
-      (s_PatchCode_constructor = env->GetMethodID(s_PatchCode_class, "<init>", "(ILjava/lang/String;Z)V")) == nullptr)
+      (s_PatchCode_constructor = env->GetMethodID(s_PatchCode_class, "<init>", "(ILjava/lang/String;Z)V")) == nullptr ||
+      (s_GameListEntry_constructor = env->GetMethodID(
+         s_GameListEntry_class, "<init>",
+         "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;JLjava/lang/String;Ljava/lang/"
+         "String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V")) == nullptr)
   {
     Log_ErrorPrint("AndroidHostInterface lookups failed");
     return -1;
@@ -932,6 +1036,86 @@ DEFINE_JNI_ARGS_METHOD(jint, AndroidHostInterface_getControllerAxisCode, jobject
   return code.value_or(-1);
 }
 
+DEFINE_JNI_ARGS_METHOD(jobjectArray, AndroidHostInterface_getControllerButtonNames, jobject unused,
+                       jstring controller_type)
+{
+  std::optional<ControllerType> type =
+    Settings::ParseControllerTypeName(AndroidHelpers::JStringToString(env, controller_type).c_str());
+  if (!type)
+    return nullptr;
+
+  const Controller::ButtonList buttons(Controller::GetButtonNames(type.value()));
+  if (buttons.empty())
+    return nullptr;
+
+  jobjectArray name_array = env->NewObjectArray(static_cast<u32>(buttons.size()), s_String_class, nullptr);
+  u32 name_array_index = 0;
+  Assert(name_array != nullptr);
+  for (const auto& [button_name, button_code] : buttons)
+  {
+    jstring button_name_jstr = env->NewStringUTF(button_name.c_str());
+    env->SetObjectArrayElement(name_array, name_array_index++, button_name_jstr);
+    env->DeleteLocalRef(button_name_jstr);
+  }
+
+  return name_array;
+}
+
+DEFINE_JNI_ARGS_METHOD(jobjectArray, AndroidHostInterface_getControllerAxisNames, jobject unused,
+                       jstring controller_type)
+{
+  std::optional<ControllerType> type =
+    Settings::ParseControllerTypeName(AndroidHelpers::JStringToString(env, controller_type).c_str());
+  if (!type)
+    return nullptr;
+
+  const Controller::AxisList axes(Controller::GetAxisNames(type.value()));
+  if (axes.empty())
+    return nullptr;
+
+  jobjectArray name_array = env->NewObjectArray(static_cast<u32>(axes.size()), s_String_class, nullptr);
+  u32 name_array_index = 0;
+  Assert(name_array != nullptr);
+  for (const auto& [axis_name, axis_code, axis_type] : axes)
+  {
+    jstring axis_name_jstr = env->NewStringUTF(axis_name.c_str());
+    env->SetObjectArrayElement(name_array, name_array_index++, axis_name_jstr);
+    env->DeleteLocalRef(axis_name_jstr);
+  }
+
+  return name_array;
+}
+
+DEFINE_JNI_ARGS_METHOD(void, AndroidHostInterface_handleControllerButtonEvent, jobject obj, jint controller_index,
+                       jint button_index, jboolean pressed)
+{
+  AndroidHelpers::GetNativeClass(env, obj)->HandleControllerButtonEvent(controller_index, button_index, pressed);
+}
+
+DEFINE_JNI_ARGS_METHOD(void, AndroidHostInterface_handleControllerAxisEvent, jobject obj, jint controller_index,
+                       jint axis_index, jfloat value)
+{
+  AndroidHelpers::GetNativeClass(env, obj)->HandleControllerAxisEvent(controller_index, axis_index, value);
+}
+
+DEFINE_JNI_ARGS_METHOD(jobjectArray, AndroidHostInterface_getInputProfileNames, jobject obj)
+{
+  AndroidHostInterface* hi = AndroidHelpers::GetNativeClass(env, obj);
+  return hi->GetInputProfileNames(env);
+}
+
+DEFINE_JNI_ARGS_METHOD(jboolean, AndroidHostInterface_loadInputProfile, jobject obj, jstring name)
+{
+  AndroidHostInterface* hi = AndroidHelpers::GetNativeClass(env, obj);
+  return hi->ApplyInputProfile(AndroidHelpers::JStringToString(env, name).c_str());
+}
+
+DEFINE_JNI_ARGS_METHOD(jboolean, AndroidHostInterface_saveInputProfile, jobject obj, jstring name)
+{
+  AndroidHostInterface* hi = AndroidHelpers::GetNativeClass(env, obj);
+  return hi->SaveInputProfile(AndroidHelpers::JStringToString(env, name).c_str());
+}
+
 DEFINE_JNI_ARGS_METHOD(void, AndroidHostInterface_refreshGameList, jobject obj, jboolean invalidate_cache,
                        jboolean invalidate_database, jobject progress_callback)
 {
@@ -945,56 +1129,140 @@ static const char* DiscRegionToString(DiscRegion region)
   return names[static_cast<int>(region)];
 }
 
+static jobject CreateGameListEntry(JNIEnv* env, AndroidHostInterface* hi, const GameListEntry& entry)
+{
+  const Timestamp modified_ts(
+    Timestamp::FromUnixTimestamp(static_cast<Timestamp::UnixTimestampValue>(entry.last_modified_time)));
+  const std::string file_title_str(System::GetTitleForPath(entry.path.c_str()));
+  const std::string cover_path_str(hi->GetGameList()->GetCoverImagePathForEntry(&entry));
+
+  jstring path = env->NewStringUTF(entry.path.c_str());
+  jstring code = env->NewStringUTF(entry.code.c_str());
+  jstring title = env->NewStringUTF(entry.title.c_str());
+  jstring file_title = env->NewStringUTF(file_title_str.c_str());
+  jstring region = env->NewStringUTF(DiscRegionToString(entry.region));
+  jstring type = env->NewStringUTF(GameList::EntryTypeToString(entry.type));
+  jstring compatibility_rating =
+    env->NewStringUTF(GameList::EntryCompatibilityRatingToString(entry.compatibility_rating));
+  jstring cover_path = (cover_path_str.empty()) ? nullptr : env->NewStringUTF(cover_path_str.c_str());
+  jstring modified_time = env->NewStringUTF(modified_ts.ToString("%Y/%m/%d, %H:%M:%S"));
+  jlong size = entry.total_size;
+
+  jobject entry_jobject =
+    env->NewObject(s_GameListEntry_class, s_GameListEntry_constructor, path, code, title, file_title, size,
+                   modified_time, region, type, compatibility_rating, cover_path);
+
+  env->DeleteLocalRef(modified_time);
+  if (cover_path)
+    env->DeleteLocalRef(cover_path);
+  env->DeleteLocalRef(compatibility_rating);
+  env->DeleteLocalRef(type);
+  env->DeleteLocalRef(region);
+  env->DeleteLocalRef(file_title);
+  env->DeleteLocalRef(title);
+  env->DeleteLocalRef(code);
+  env->DeleteLocalRef(path);
+
+  return entry_jobject;
+}
+
 DEFINE_JNI_ARGS_METHOD(jarray, AndroidHostInterface_getGameListEntries, jobject obj)
 {
-  jclass entry_class = env->FindClass("com/github/stenzek/duckstation/GameListEntry");
-  Assert(entry_class != nullptr);
-
-  jmethodID entry_constructor =
-    env->GetMethodID(entry_class, "<init>",
-                     "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;JLjava/lang/"
-                     "String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
-  Assert(entry_constructor != nullptr);
-
   AndroidHostInterface* hi = AndroidHelpers::GetNativeClass(env, obj);
-  jobjectArray entry_array = env->NewObjectArray(hi->GetGameList()->GetEntryCount(), entry_class, nullptr);
+  jobjectArray entry_array = env->NewObjectArray(hi->GetGameList()->GetEntryCount(), s_GameListEntry_class, nullptr);
   Assert(entry_array != nullptr);
 
   u32 counter = 0;
   for (const GameListEntry& entry : hi->GetGameList()->GetEntries())
   {
-    const Timestamp modified_ts(
-      Timestamp::FromUnixTimestamp(static_cast<Timestamp::UnixTimestampValue>(entry.last_modified_time)));
-    const std::string file_title_str(System::GetTitleForPath(entry.path.c_str()));
-    const std::string cover_path_str(hi->GetGameList()->GetCoverImagePathForEntry(&entry));
+    jobject entry_jobject = CreateGameListEntry(env, hi, entry);
+    env->SetObjectArrayElement(entry_array, counter++, entry_jobject);
+    env->DeleteLocalRef(entry_jobject);
+  }
 
-    jstring path = env->NewStringUTF(entry.path.c_str());
-    jstring code = env->NewStringUTF(entry.code.c_str());
-    jstring title = env->NewStringUTF(entry.title.c_str());
-    jstring file_title = env->NewStringUTF(file_title_str.c_str());
-    jstring region = env->NewStringUTF(DiscRegionToString(entry.region));
-    jstring type = env->NewStringUTF(GameList::EntryTypeToString(entry.type));
-    jstring compatibility_rating =
-      env->NewStringUTF(GameList::EntryCompatibilityRatingToString(entry.compatibility_rating));
-    jstring cover_path = (cover_path_str.empty()) ? nullptr : env->NewStringUTF(cover_path_str.c_str());
-    jstring modified_time = env->NewStringUTF(modified_ts.ToString("%Y/%m/%d, %H:%M:%S"));
-    jlong size = entry.total_size;
+  return entry_array;
+}
 
-    jobject entry_jobject = env->NewObject(entry_class, entry_constructor, path, code, title, file_title, size,
-                                           modified_time, region, type, compatibility_rating, cover_path);
+DEFINE_JNI_ARGS_METHOD(jobject, AndroidHostInterface_getGameListEntry, jobject obj, jstring path)
+{
+  AndroidHostInterface* hi = AndroidHelpers::GetNativeClass(env, obj);
+  const std::string path_str(AndroidHelpers::JStringToString(env, path));
+  const GameListEntry* entry = hi->GetGameList()->GetEntryForPath(path_str.c_str());
+  if (!entry)
+    return nullptr;
+
+  return CreateGameListEntry(env, hi, *entry);
+}
+
+DEFINE_JNI_ARGS_METHOD(jstring, AndroidHostInterface_getGameSettingValue, jobject obj, jstring path, jstring key)
+{
+  AndroidHostInterface* hi = AndroidHelpers::GetNativeClass(env, obj);
+  const std::string path_str(AndroidHelpers::JStringToString(env, path));
+  const std::string key_str(AndroidHelpers::JStringToString(env, key));
+
+  const GameListEntry* entry = hi->GetGameList()->GetEntryForPath(path_str.c_str());
+  if (!entry)
+    return nullptr;
+
+  std::optional<std::string> value = entry->settings.GetValueForKey(key_str);
+  if (!value.has_value())
+    return nullptr;
+  else
+    return env->NewStringUTF(value->c_str());
+}
+
+DEFINE_JNI_ARGS_METHOD(void, AndroidHostInterface_setGameSettingValue, jobject obj, jstring path, jstring key,
+                       jstring value)
+{
+  AndroidHostInterface* hi = AndroidHelpers::GetNativeClass(env, obj);
+  const std::string path_str(AndroidHelpers::JStringToString(env, path));
+  const std::string key_str(AndroidHelpers::JStringToString(env, key));
+
+  const GameListEntry* entry = hi->GetGameList()->GetEntryForPath(path_str.c_str());
+  if (!entry)
+    return;
+
+  GameSettings::Entry new_entry(entry->settings);
+
+  std::optional<std::string> value_str;
+  if (value)
+    value_str = AndroidHelpers::JStringToString(env, value);
+
+  new_entry.SetValueForKey(key_str, value_str);
+  hi->GetGameList()->UpdateGameSettings(path_str, entry->code, entry->title, new_entry, true);
+}
+
+DEFINE_JNI_ARGS_METHOD(jobjectArray, AndroidHostInterface_getHotkeyInfoList, jobject obj)
+{
+  jclass entry_class = env->FindClass("com/github/stenzek/duckstation/HotkeyInfo");
+  Assert(entry_class != nullptr);
+
+  jmethodID entry_constructor =
+    env->GetMethodID(entry_class, "<init>", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+  Assert(entry_constructor != nullptr);
+
+  AndroidHostInterface* hi = AndroidHelpers::GetNativeClass(env, obj);
+  const CommonHostInterface::HotkeyInfoList& hotkeys = hi->GetHotkeyInfoList();
+  if (hotkeys.empty())
+    return nullptr;
+
+  jobjectArray entry_array = env->NewObjectArray(static_cast<jsize>(hotkeys.size()), entry_class, nullptr);
+  Assert(entry_array != nullptr);
+
+  u32 counter = 0;
+  for (const CommonHostInterface::HotkeyInfo& hk : hotkeys)
+  {
+    jstring category = env->NewStringUTF(hk.category.GetCharArray());
+    jstring name = env->NewStringUTF(hk.name.GetCharArray());
+    jstring display_name = env->NewStringUTF(hk.display_name.GetCharArray());
+
+    jobject entry_jobject = env->NewObject(entry_class, entry_constructor, category, name, display_name);
 
     env->SetObjectArrayElement(entry_array, counter++, entry_jobject);
     env->DeleteLocalRef(entry_jobject);
-    env->DeleteLocalRef(modified_time);
-    if (cover_path)
-      env->DeleteLocalRef(cover_path);
-    env->DeleteLocalRef(compatibility_rating);
-    env->DeleteLocalRef(type);
-    env->DeleteLocalRef(region);
-    env->DeleteLocalRef(file_title);
-    env->DeleteLocalRef(title);
-    env->DeleteLocalRef(code);
-    env->DeleteLocalRef(path);
+    env->DeleteLocalRef(display_name);
+    env->DeleteLocalRef(name);
+    env->DeleteLocalRef(category);
   }
 
   return entry_array;

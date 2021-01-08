@@ -126,7 +126,7 @@ public:
   std::optional<std::vector<u8>> GetBIOSImage(ConsoleRegion region);
 
   /// Searches for a BIOS image for the specified region in the specified directory. If no match is found, the first
-  /// 512KB BIOS image will be used.
+  /// BIOS image within 512KB and 4MB will be used.
   std::optional<std::vector<u8>> FindBIOSImageInDirectory(ConsoleRegion region, const char* directory);
 
   /// Returns a list of filenames and descriptions for BIOS images in a directory.
@@ -174,6 +174,9 @@ protected:
 
   /// Switches the GPU renderer by saving state, recreating the display window, and restoring state (if needed).
   virtual void RecreateSystem();
+
+  /// Enables "relative" mouse mode, locking the cursor position and returning relative coordinates.
+  virtual void SetMouseMode(bool relative, bool hide_cursor);
 
   /// Sets the user directory to the program directory, i.e. "portable mode".
   void SetUserDirectoryToProgramDirectory();

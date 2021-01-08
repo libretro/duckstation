@@ -14,6 +14,7 @@
 #include "system.h"
 #include "timing_event.h"
 #include <cstdio>
+
 Log_SetChannel(CPU::Core);
 
 namespace CPU {
@@ -22,11 +23,15 @@ static void SetPC(u32 new_pc);
 static void UpdateLoadDelay();
 static void Branch(u32 target);
 static void FlushPipeline();
+static void UpdateDebugDispatcherFlag();
 
 State g_state;
 bool g_using_interpreter = false;
 bool TRACE_EXECUTION = false;
-bool LOG_EXECUTION = false;
+
+static std::FILE* s_log_file = nullptr;
+static bool s_log_file_opened = false;
+static bool s_trace_to_log = false;
 
 static constexpr u32 INVALID_BREAKPOINT_PC = UINT32_C(0xFFFFFFFF);
 static std::vector<Breakpoint> s_breakpoints;
@@ -34,24 +39,50 @@ static u32 s_breakpoint_counter = 1;
 static u32 s_last_breakpoint_check_pc = INVALID_BREAKPOINT_PC;
 static bool s_single_step = false;
 
+bool IsTraceEnabled()
+{
+  return s_trace_to_log;
+}
+
+void StartTrace()
+{
+  if (s_trace_to_log)
+    return;
+
+  s_trace_to_log = true;
+  UpdateDebugDispatcherFlag();
+}
+
+void StopTrace()
+{
+  if (!s_trace_to_log)
+    return;
+
+  if (s_log_file)
+    std::fclose(s_log_file);
+
+  s_log_file_opened = false;
+  s_trace_to_log = false;
+  UpdateDebugDispatcherFlag();
+}
+
 void WriteToExecutionLog(const char* format, ...)
 {
-  static std::FILE* log_file = nullptr;
-  static bool log_file_opened = false;
-
   std::va_list ap;
   va_start(ap, format);
 
-  if (!log_file_opened)
+  if (!s_log_file_opened)
   {
-    log_file = FileSystem::OpenCFile("cpu_log.txt", "wb");
-    log_file_opened = true;
+    s_log_file = FileSystem::OpenCFile("cpu_log.txt", "wb");
+    s_log_file_opened = true;
   }
 
-  if (log_file)
+  if (s_log_file)
   {
-    std::vfprintf(log_file, format, ap);
-    std::fflush(log_file);
+    std::vfprintf(s_log_file, format, ap);
+#ifdef _DEBUG
+    std::fflush(s_log_file);
+#endif
   }
 
   va_end(ap);
@@ -79,6 +110,7 @@ void Shutdown()
   // GTE::Shutdown();
   PGXP::Shutdown();
   ClearBreakpoints();
+  StopTrace();
 }
 
 void Reset()
@@ -216,7 +248,7 @@ void RaiseException(u32 CAUSE_bits, u32 EPC)
                     g_state.cop0_regs.EPC, g_state.cop0_regs.cause.BD ? "true" : "false",
                     g_state.cop0_regs.cause.CE.GetValue());
     DisassembleAndPrint(g_state.current_instruction_pc, 4, 0);
-    if (LOG_EXECUTION)
+    if (s_trace_to_log)
     {
       CPU::WriteToExecutionLog("Exception %u at 0x%08X (epc=0x%08X, BD=%s, CE=%u)\n",
                                static_cast<u8>(g_state.cop0_regs.cause.Excode.GetValue()),
@@ -527,8 +559,6 @@ restart_instruction:
 #ifdef _DEBUG
   if (TRACE_EXECUTION)
     PrintInstruction(inst.bits, g_state.current_instruction_pc, &g_state.regs);
-  if (LOG_EXECUTION)
-    LogInstruction(inst.bits, g_state.current_instruction_pc, &g_state.regs);
 #endif
 
   // Skip nops. Makes PGXP-CPU quicker, but also the regular interpreter.
@@ -1469,7 +1499,7 @@ static void UpdateDebugDispatcherFlag()
 
   // TODO: cop0 breakpoints
 
-  const bool use_debug_dispatcher = has_any_breakpoints;
+  const bool use_debug_dispatcher = has_any_breakpoints || s_trace_to_log;
   if (use_debug_dispatcher == g_state.use_debug_dispatcher)
     return;
 
@@ -1757,6 +1787,13 @@ static void ExecuteImpl()
       if (!FetchInstruction())
         continue;
 
+      // trace functionality
+      if constexpr (debug)
+      {
+        if (s_trace_to_log)
+          LogInstruction(g_state.current_instruction.bits, g_state.current_instruction_pc, &g_state.regs);
+      }
+
 #if 0 // GTE flag test debugging
       if (g_state.m_current_instruction_pc == 0x8002cdf4)
       {
@@ -1856,6 +1893,7 @@ template void InterpretCachedBlock<PGXPMode::Disabled>(const CodeBlock& block);
 template void InterpretCachedBlock<PGXPMode::Memory>(const CodeBlock& block);
 template void InterpretCachedBlock<PGXPMode::CPU>(const CodeBlock& block);
 
+template<PGXPMode pgxp_mode>
 void InterpretUncachedBlock()
 {
   g_state.regs.npc = g_state.regs.pc;
@@ -1890,7 +1928,7 @@ void InterpretUncachedBlock()
     }
 
     // execute the instruction we previously fetched
-    ExecuteInstruction<PGXPMode::Disabled>();
+    ExecuteInstruction<pgxp_mode>();
 
     // next load delay
     UpdateLoadDelay();
@@ -1904,6 +1942,10 @@ void InterpretUncachedBlock()
     in_branch_delay_slot = branch;
   }
 }
+
+template void InterpretUncachedBlock<PGXPMode::Disabled>();
+template void InterpretUncachedBlock<PGXPMode::Memory>();
+template void InterpretUncachedBlock<PGXPMode::CPU>();
 
 } // namespace CodeCache
 

@@ -1,6 +1,7 @@
 package com.github.stenzek.duckstation;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.res.AssetManager;
 import android.os.Environment;
 import android.util.Log;
@@ -70,9 +71,31 @@ public class AndroidHostInterface {
 
     public static native int getControllerAxisCode(String controllerType, String axisName);
 
+    public static native String[] getControllerButtonNames(String controllerType);
+
+    public static native String[] getControllerAxisNames(String controllerType);
+
+    public native void handleControllerButtonEvent(int controllerIndex, int buttonIndex, boolean pressed);
+
+    public native void handleControllerAxisEvent(int controllerIndex, int axisIndex, float value);
+
+    public native String[] getInputProfileNames();
+
+    public native boolean loadInputProfile(String name);
+
+    public native boolean saveInputProfile(String name);
+
+    public native HotkeyInfo[] getHotkeyInfoList();
+
     public native void refreshGameList(boolean invalidateCache, boolean invalidateDatabase, AndroidProgressCallback progressCallback);
 
     public native GameListEntry[] getGameListEntries();
+
+    public native GameListEntry getGameListEntry(String path);
+
+    public native String getGameSettingValue(String path, String key);
+
+    public native void setGameSettingValue(String path, String key, String value);
 
     public native void resetSystem();
 

@@ -301,10 +301,11 @@ std::optional<std::vector<u8>> HostInterface::FindBIOSImageInDirectory(ConsoleRe
 
   std::string fallback_path;
   std::optional<BIOS::Image> fallback_image;
+  const BIOS::ImageInfo* fallback_info = nullptr;
 
   for (const FILESYSTEM_FIND_DATA& fd : results)
   {
-    if (fd.Size != BIOS::BIOS_SIZE)
+    if (fd.Size != BIOS::BIOS_SIZE && fd.Size != BIOS::BIOS_SIZE_PS2 && fd.Size != BIOS::BIOS_SIZE_PS3)
     {
       Log_WarningPrintf("Skipping '%s': incorrect size", fd.FileName.c_str());
       continue;
@@ -320,14 +321,21 @@ std::optional<std::vector<u8>> HostInterface::FindBIOSImageInDirectory(ConsoleRe
     BIOS::Hash found_hash = BIOS::GetHash(*found_image);
     Log_DevPrintf("Hash for BIOS '%s': %s", fd.FileName.c_str(), found_hash.ToString().c_str());
 
+    const BIOS::ImageInfo* ii = BIOS::GetImageInfoForHash(found_hash);
+
     if (BIOS::IsValidHashForRegion(region, found_hash))
     {
-      Log_InfoPrintf("Using BIOS '%s'", fd.FileName.c_str());
+      Log_InfoPrintf("Using BIOS '%s': %s", fd.FileName.c_str(), ii ? ii->description : "");
       return found_image;
     }
 
+    // don't let an unknown bios take precedence over a known one
+    if (!fallback_path.empty() && (fallback_info || !ii))
+      continue;
+
     fallback_path = std::move(full_path);
     fallback_image = std::move(found_image);
+    fallback_info = ii;
   }
 
   if (!fallback_image.has_value())
@@ -338,7 +346,16 @@ std::optional<std::vector<u8>> HostInterface::FindBIOSImageInDirectory(ConsoleRe
     return std::nullopt;
   }
 
-  Log_WarningPrintf("Falling back to possibly-incompatible image '%s'", fallback_path.c_str());
+  if (!fallback_info)
+  {
+    Log_WarningPrintf("Using unknown BIOS '%s'. This may crash.", fallback_path.c_str());
+  }
+  else
+  {
+    Log_WarningPrintf("Falling back to possibly-incompatible image '%s': %s", fallback_path.c_str(),
+                      fallback_info->description);
+  }
+
   return fallback_image;
 }
 
@@ -353,7 +370,7 @@ HostInterface::FindBIOSImagesInDirectory(const char* directory)
 
   for (FILESYSTEM_FIND_DATA& fd : files)
   {
-    if (fd.Size != BIOS::BIOS_SIZE)
+    if (fd.Size != BIOS::BIOS_SIZE && fd.Size != BIOS::BIOS_SIZE_PS2 && fd.Size != BIOS::BIOS_SIZE_PS3)
       continue;
 
     std::string full_path(
@@ -374,7 +391,7 @@ HostInterface::FindBIOSImagesInDirectory(const char* directory)
 bool HostInterface::HasAnyBIOSImages()
 {
   const std::string dir = GetBIOSDirectory();
-  return (FindBIOSImageInDirectory(ConsoleRegion::NTSC_U, dir.c_str()).has_value());
+  return (FindBIOSImageInDirectory(ConsoleRegion::Auto, dir.c_str()).has_value());
 }
 
 bool HostInterface::LoadState(const char* filename)
@@ -462,6 +479,7 @@ void HostInterface::SetDefaultSettings(SettingsInterface& si)
   si.SetBoolValue("Main", "ConfirmPowerOff", true);
   si.SetBoolValue("Main", "LoadDevicesFromSaveStates", false);
   si.SetBoolValue("Main", "ApplyGameSettings", true);
+  si.SetBoolValue("Main", "DisableAllEnhancements", false);
 
   si.SetStringValue("CPU", "ExecutionMode", Settings::GetCPUExecutionModeName(Settings::DEFAULT_CPU_EXECUTION_MODE));
   si.SetBoolValue("CPU", "RecompilerMemoryExceptions", false);
@@ -474,9 +492,11 @@ void HostInterface::SetDefaultSettings(SettingsInterface& si)
   si.SetBoolValue("GPU", "UseDebugDevice", false);
   si.SetBoolValue("GPU", "PerSampleShading", false);
   si.SetBoolValue("GPU", "UseThread", true);
+  si.SetBoolValue("GPU", "ThreadedPresentation", true);
   si.SetBoolValue("GPU", "TrueColor", false);
   si.SetBoolValue("GPU", "ScaledDithering", true);
   si.SetStringValue("GPU", "TextureFilter", Settings::GetTextureFilterName(Settings::DEFAULT_GPU_TEXTURE_FILTER));
+  si.SetStringValue("GPU", "DownsampleMode", Settings::GetDownsampleModeName(Settings::DEFAULT_GPU_DOWNSAMPLE_MODE));
   si.SetBoolValue("GPU", "DisableInterlacing", false);
   si.SetBoolValue("GPU", "ForceNTSCTimings", false);
   si.SetBoolValue("GPU", "WidescreenHack", false);
@@ -572,6 +592,29 @@ void HostInterface::LoadSettings(SettingsInterface& si)
 
 void HostInterface::FixIncompatibleSettings(bool display_osd_messages)
 {
+  if (g_settings.disable_all_enhancements)
+  {
+    Log_WarningPrintf("All enhancements disabled by config setting.");
+    g_settings.cpu_overclock_enable = false;
+    g_settings.cpu_overclock_active = false;
+    g_settings.gpu_resolution_scale = 1;
+    g_settings.gpu_multisamples = 1;
+    g_settings.gpu_per_sample_shading = false;
+    g_settings.gpu_true_color = false;
+    g_settings.gpu_scaled_dithering = false;
+    g_settings.gpu_texture_filter = GPUTextureFilter::Nearest;
+    g_settings.gpu_disable_interlacing = false;
+    g_settings.gpu_force_ntsc_timings = false;
+    g_settings.gpu_widescreen_hack = false;
+    g_settings.gpu_pgxp_enable = false;
+    g_settings.gpu_24bit_chroma_smoothing = false;
+    g_settings.cdrom_read_speedup = false;
+    g_settings.cdrom_mute_cd_audio = false;
+    g_settings.texture_replacements.enable_vram_write_replacements = false;
+    g_settings.bios_patch_fast_boot = false;
+    g_settings.bios_patch_tty_enable = false;
+  }
+
   if (g_settings.gpu_pgxp_enable)
   {
     if (g_settings.gpu_renderer == GPURenderer::Software)
@@ -613,7 +656,8 @@ void HostInterface::SaveSettings(SettingsInterface& si)
 void HostInterface::CheckForSettingsChanges(const Settings& old_settings)
 {
   if (System::IsValid() && (g_settings.gpu_renderer != old_settings.gpu_renderer ||
-                            g_settings.gpu_use_debug_device != old_settings.gpu_use_debug_device))
+                            g_settings.gpu_use_debug_device != old_settings.gpu_use_debug_device ||
+                            g_settings.gpu_threaded_presentation != old_settings.gpu_threaded_presentation))
   {
     AddFormattedOSDMessage(5.0f, TranslateString("OSDMessage", "Switching to %s%s GPU renderer."),
                            Settings::GetRendererName(g_settings.gpu_renderer),
@@ -694,6 +738,7 @@ void HostInterface::CheckForSettingsChanges(const Settings& old_settings)
         g_settings.gpu_disable_interlacing != old_settings.gpu_disable_interlacing ||
         g_settings.gpu_force_ntsc_timings != old_settings.gpu_force_ntsc_timings ||
         g_settings.gpu_24bit_chroma_smoothing != old_settings.gpu_24bit_chroma_smoothing ||
+        g_settings.gpu_downsample_mode != old_settings.gpu_downsample_mode ||
         g_settings.display_crop_mode != old_settings.display_crop_mode ||
         g_settings.display_aspect_ratio != old_settings.display_aspect_ratio ||
         g_settings.gpu_pgxp_enable != old_settings.gpu_pgxp_enable ||
@@ -915,19 +960,27 @@ void HostInterface::UpdateSoftwareCursor()
 {
   if (System::IsShutdown())
   {
+    SetMouseMode(false, false);
     m_display->ClearSoftwareCursor();
     return;
   }
 
   const Common::RGBA8Image* image = nullptr;
   float image_scale = 1.0f;
+  bool relative_mode = false;
+  bool hide_cursor = false;
 
   for (u32 i = 0; i < NUM_CONTROLLER_AND_CARD_PORTS; i++)
   {
     Controller* controller = System::GetController(i);
-    if (controller && controller->GetSoftwareCursor(&image, &image_scale))
+    if (controller && controller->GetSoftwareCursor(&image, &image_scale, &relative_mode))
+    {
+      hide_cursor = true;
       break;
+    }
   }
+
+  SetMouseMode(relative_mode, hide_cursor);
 
   if (image && image->IsValid())
   {
@@ -964,6 +1017,8 @@ void HostInterface::RecreateSystem()
 
   System::ResetPerformanceCounters();
 }
+
+void HostInterface::SetMouseMode(bool relative, bool hide_cursor) {}
 
 void HostInterface::DisplayLoadingScreen(const char* message, int progress_min /*= -1*/, int progress_max /*= -1*/,
                                          int progress_value /*= -1*/)

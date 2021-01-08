@@ -51,12 +51,18 @@ public:
   void SetControllerType(u32 index, std::string_view type_name);
   void SetControllerButtonState(u32 index, s32 button_code, bool pressed);
   void SetControllerAxisState(u32 index, s32 button_code, float value);
+  void HandleControllerButtonEvent(u32 controller_index, u32 button_index, bool pressed);
+  void HandleControllerAxisEvent(u32 controller_index, u32 axis_index, float value);
   void SetFastForwardEnabled(bool enabled);
 
   void RefreshGameList(bool invalidate_cache, bool invalidate_database, ProgressCallback* progress_callback);
   void ApplySettings(bool display_osd_messages);
 
   bool ImportPatchCodesFromString(const std::string& str);
+
+  jobjectArray GetInputProfileNames(JNIEnv* env) const;
+  bool ApplyInputProfile(const char* profile_name);
+  bool SaveInputProfile(const char* profile_name);
 
 protected:
   void SetUserDirectory() override;
@@ -66,6 +72,7 @@ protected:
   bool AcquireHostDisplay() override;
   void ReleaseHostDisplay() override;
   std::unique_ptr<AudioStream> CreateAudioStream(AudioBackend backend) override;
+  void UpdateControllerInterface() override;
 
   void OnSystemPaused(bool paused) override;
   void OnSystemDestroyed() override;
@@ -108,6 +115,7 @@ JNIEnv* GetJNIEnv();
 AndroidHostInterface* GetNativeClass(JNIEnv* env, jobject obj);
 std::string JStringToString(JNIEnv* env, jstring str);
 std::unique_ptr<GrowableMemoryByteStream> ReadInputStreamToMemory(JNIEnv* env, jobject obj, u32 chunk_size = 65536);
+jclass GetStringClass();
 } // namespace AndroidHelpers
 
 template<typename T>

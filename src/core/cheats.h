@@ -62,6 +62,7 @@ struct CheatCode
     ExtConstantForceRangeLimits16 = 0xF1,
     ExtConstantForceRangeRollRound16 = 0xF2,
     ExtConstantForceRange16 = 0xF3,
+    ExtFindAndReplace = 0xF4,
     ExtConstantBitSet8 = 0x31,
     ExtConstantBitClear8 = 0x32,
     ExtConstantBitSet16 = 0x81,
@@ -123,6 +124,7 @@ public:
     Autodetect,
     PCSXR,
     Libretro,
+    EPSXe,
     Count
   };
 
@@ -161,6 +163,7 @@ public:
   bool LoadFromString(const std::string& str, Format format);
   bool LoadFromPCSXRString(const std::string& str);
   bool LoadFromLibretroString(const std::string& str);
+  bool LoadFromEPSXeString(const std::string& str);
 
   bool SaveToPCSXRFile(const char* filename);
 

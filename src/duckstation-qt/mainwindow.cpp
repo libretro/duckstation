@@ -47,6 +47,20 @@ MainWindow::MainWindow(QtHostInterface* host_interface)
 {
   m_host_interface->setMainWindow(this);
 
+  // force creation of native window
+  winId();
+}
+
+MainWindow::~MainWindow()
+{
+  Assert(!m_display_widget);
+  m_host_interface->setMainWindow(nullptr);
+
+  Assert(!m_debugger_window);
+}
+
+void MainWindow::initializeAndShow()
+{
   m_ui.setupUi(this);
   setupAdditionalUi();
   connectSignals();
@@ -56,14 +70,8 @@ MainWindow::MainWindow(QtHostInterface* host_interface)
 
   restoreStateFromConfig();
   switchToGameListView();
-}
 
-MainWindow::~MainWindow()
-{
-  Assert(!m_display_widget);
-  m_host_interface->setMainWindow(nullptr);
-
-  Assert(!m_debugger_window);
+  show();
 }
 
 void MainWindow::reportError(const QString& message)
@@ -90,8 +98,7 @@ bool MainWindow::shouldHideCursorInFullscreen() const
   return g_host_interface->GetBoolSettingValue("Main", "HideCursorInFullscreen", true);
 }
 
-QtDisplayWidget* MainWindow::createDisplay(QThread* worker_thread, const QString& adapter_name, bool use_debug_device,
-                                           bool fullscreen, bool render_to_main)
+QtDisplayWidget* MainWindow::createDisplay(QThread* worker_thread, bool fullscreen, bool render_to_main)
 {
   Assert(!m_host_display && !m_display_widget);
   Assert(!fullscreen || !render_to_main);
@@ -117,8 +124,7 @@ QtDisplayWidget* MainWindow::createDisplay(QThread* worker_thread, const QString
     else
       m_display_widget->showNormal();
 
-    if (shouldHideCursorInFullscreen())
-      m_display_widget->setCursor(Qt::BlankCursor);
+    updateMouseMode(System::IsPaused());
   }
   else if (!render_to_main)
   {
@@ -143,7 +149,8 @@ QtDisplayWidget* MainWindow::createDisplay(QThread* worker_thread, const QString
     return nullptr;
   }
 
-  if (!m_host_display->CreateRenderDevice(wi.value(), adapter_name.toStdString(), use_debug_device))
+  if (!m_host_display->CreateRenderDevice(wi.value(), g_settings.gpu_adapter, g_settings.gpu_use_debug_device,
+                                          g_settings.gpu_threaded_presentation))
   {
     reportError(tr("Failed to create host display device context."));
     destroyDisplayWidget();
@@ -181,8 +188,7 @@ QtDisplayWidget* MainWindow::updateDisplay(QThread* worker_thread, bool fullscre
     else
       m_display_widget->showNormal();
 
-    if (shouldHideCursorInFullscreen())
-      m_display_widget->setCursor(Qt::BlankCursor);
+    updateMouseMode(System::IsPaused());
   }
   else if (!render_to_main)
   {
@@ -290,6 +296,34 @@ void MainWindow::focusDisplayWidget()
   m_display_widget->setFocus();
 }
 
+void MainWindow::onMouseModeRequested(bool relative_mode, bool hide_cursor)
+{
+  m_relative_mouse_mode = relative_mode;
+  m_mouse_cursor_hidden = hide_cursor;
+  updateMouseMode(System::IsPaused());
+}
+
+void MainWindow::updateMouseMode(bool paused)
+{
+  if (!m_display_widget)
+    return;
+
+  if (paused)
+  {
+    m_display_widget->unsetCursor();
+    m_display_widget->setRelativeMode(false);
+    return;
+  }
+
+  const bool hide_mouse = m_mouse_cursor_hidden || (m_display_widget->isFullScreen() && shouldHideCursorInFullscreen());
+  if (hide_mouse)
+    m_display_widget->setCursor(Qt::BlankCursor);
+  else
+    m_display_widget->unsetCursor();
+
+  m_display_widget->setRelativeMode(m_relative_mouse_mode);
+}
+
 void MainWindow::onEmulationStarting()
 {
   m_emulation_running = true;
@@ -327,6 +361,7 @@ void MainWindow::onEmulationPaused(bool paused)
 {
   QSignalBlocker blocker(m_ui.actionPause);
   m_ui.actionPause->setChecked(paused);
+  updateMouseMode(paused);
 }
 
 void MainWindow::onStateSaved(const QString& game_code, bool global, qint32 slot)
@@ -372,6 +407,7 @@ void MainWindow::onApplicationStateChanged(Qt::ApplicationState state)
     {
       m_host_interface->pauseSystem(true);
       m_was_paused_by_focus_loss = true;
+      updateMouseMode(true);
     }
   }
   else
@@ -381,6 +417,7 @@ void MainWindow::onApplicationStateChanged(Qt::ApplicationState state)
       if (System::IsPaused())
         m_host_interface->pauseSystem(false);
       m_was_paused_by_focus_loss = false;
+      updateMouseMode(false);
     }
   }
 }
@@ -599,6 +636,17 @@ void MainWindow::onGameListContextMenuRequested(const QPoint& point, const GameL
         boot_params->override_fast_boot = false;
         m_host_interface->bootSystem(std::move(boot_params));
       });
+
+      if (m_ui.menuDebug->menuAction()->isVisible())
+      {
+        connect(menu.addAction(tr("Boot and Debug")), &QAction::triggered, [this, entry]() {
+          m_open_debugger_on_start = true;
+
+          auto boot_params = std::make_shared<SystemBootParameters>(entry->path);
+          boot_params->override_start_paused = true;
+          m_host_interface->bootSystem(std::move(boot_params));
+        });
+      }
     }
     else
     {
@@ -762,6 +810,7 @@ void MainWindow::updateEmulationActions(bool starting, bool running)
   m_ui.actionResumeLastState->setDisabled(starting || running);
 
   m_ui.actionPowerOff->setDisabled(starting || !running);
+  m_ui.actionPowerOffWithoutSaving->setDisabled(starting || !running);
   m_ui.actionReset->setDisabled(starting || !running);
   m_ui.actionPause->setDisabled(starting || !running);
   m_ui.actionChangeDisc->setDisabled(starting || !running);
@@ -815,11 +864,19 @@ void MainWindow::updateEmulationActions(bool starting, bool running)
     }
   }
 
-  if (g_settings.debugging.enable_gdb_server) {
-    if (starting && !m_gdb_server) {
+  if (m_open_debugger_on_start && running)
+    openCPUDebugger();
+  if ((!starting && !running) || running)
+    m_open_debugger_on_start = false;
+
+  if (g_settings.debugging.enable_gdb_server)
+  {
+    if (starting && !m_gdb_server)
+    {
       m_gdb_server = new GDBServer(this, g_settings.debugging.gdb_server_port);
     }
-    else if (!running && m_gdb_server) {
+    else if (!running && m_gdb_server)
+    {
       delete m_gdb_server;
       m_gdb_server = nullptr;
     }
@@ -870,6 +927,8 @@ void MainWindow::connectSignals()
   connect(m_ui.actionAddGameDirectory, &QAction::triggered,
           [this]() { getSettingsDialog()->getGameListSettingsWidget()->addSearchDirectory(this); });
   connect(m_ui.actionPowerOff, &QAction::triggered, m_host_interface, &QtHostInterface::powerOffSystem);
+  connect(m_ui.actionPowerOffWithoutSaving, &QAction::triggered, m_host_interface,
+          &QtHostInterface::powerOffSystemWithoutSaving);
   connect(m_ui.actionReset, &QAction::triggered, m_host_interface, &QtHostInterface::resetSystem);
   connect(m_ui.actionPause, &QAction::toggled, [this](bool active) { m_host_interface->pauseSystem(active); });
   connect(m_ui.actionScreenshot, &QAction::triggered, m_host_interface, &QtHostInterface::saveScreenshot);
@@ -920,7 +979,7 @@ void MainWindow::connectSignals()
   connect(m_ui.actionCheckForUpdates, &QAction::triggered, this, &MainWindow::onCheckForUpdatesActionTriggered);
   connect(m_ui.actionMemory_Card_Editor, &QAction::triggered, this, &MainWindow::onToolsMemoryCardEditorTriggered);
   connect(m_ui.actionCheatManager, &QAction::triggered, this, &MainWindow::onToolsCheatManagerTriggered);
-  connect(m_ui.actionCPUDebugger, &QAction::triggered, this, &MainWindow::onToolsCPUDebuggerTriggered);
+  connect(m_ui.actionCPUDebugger, &QAction::triggered, this, &MainWindow::openCPUDebugger);
   connect(m_ui.actionOpenDataDirectory, &QAction::triggered, this, &MainWindow::onToolsOpenDataDirectoryTriggered);
   connect(m_ui.actionGridViewShowTitles, &QAction::triggered, m_game_list_widget, &GameListWidget::setShowCoverTitles);
   connect(m_ui.actionGridViewZoomIn, &QAction::triggered, m_game_list_widget, [this]() {
@@ -955,6 +1014,7 @@ void MainWindow::connectSignals()
           &MainWindow::onSystemPerformanceCountersUpdated);
   connect(m_host_interface, &QtHostInterface::runningGameChanged, this, &MainWindow::onRunningGameChanged);
   connect(m_host_interface, &QtHostInterface::exitRequested, this, &MainWindow::close);
+  connect(m_host_interface, &QtHostInterface::mouseModeRequested, this, &MainWindow::onMouseModeRequested);
 
   // These need to be queued connections to stop crashing due to menus opening/closing and switching focus.
   connect(m_game_list_widget, &GameListWidget::entrySelected, this, &MainWindow::onGameListEntrySelected,
@@ -1347,17 +1407,21 @@ void MainWindow::onToolsCheatManagerTriggered()
   m_cheat_manager_dialog->show();
 }
 
-void MainWindow::onToolsCPUDebuggerTriggered()
+void MainWindow::openCPUDebugger()
 {
-  if (!m_debugger_window)
-  {
-    m_debugger_window = new DebuggerWindow();
-    m_debugger_window->setWindowIcon(windowIcon());
-    connect(m_debugger_window, &DebuggerWindow::closed, this, &MainWindow::onCPUDebuggerClosed);
-  }
+  m_host_interface->pauseSystem(true, true);
+  if (!System::IsValid())
+    return;
 
+  Assert(!m_debugger_window);
+
+  m_debugger_window = new DebuggerWindow();
+  m_debugger_window->setWindowIcon(windowIcon());
+  connect(m_debugger_window, &DebuggerWindow::closed, this, &MainWindow::onCPUDebuggerClosed);
   m_debugger_window->show();
-  m_host_interface->pauseSystem(true);
+
+  // the debugger will miss the pause event above (or we were already paused), so fire it now
+  m_debugger_window->onEmulationPaused(true);
 }
 
 void MainWindow::onCPUDebuggerClosed()

@@ -8,11 +8,9 @@
 #include "core/settings.h"
 #include "display_ps.hlsl.h"
 #include "display_vs.hlsl.h"
-#include <array>
-#ifndef LIBRETRO
 #include "frontend-common/postprocessing_shadergen.h"
+#include <array>
 #include <dxgi1_5.h>
-#endif
 #ifdef WITH_IMGUI
 #include "imgui.h"
 #include "imgui_impl_dx11.h"
@@ -78,9 +76,7 @@ D3D11HostDisplay::D3D11HostDisplay() = default;
 D3D11HostDisplay::~D3D11HostDisplay()
 {
   AssertMsg(!m_context, "Context should have been destroyed by now");
-#ifndef LIBRETRO
   AssertMsg(!m_swap_chain, "Swap chain should have been destroyed by now");
-#endif
 }
 
 HostDisplay::RenderAPI D3D11HostDisplay::GetRenderAPI() const
@@ -105,11 +101,7 @@ bool D3D11HostDisplay::HasRenderDevice() const
 
 bool D3D11HostDisplay::HasRenderSurface() const
 {
-#ifndef LIBRETRO
   return static_cast<bool>(m_swap_chain);
-#else
-  return true;
-#endif
 }
 
 std::unique_ptr<HostDisplayTexture> D3D11HostDisplay::CreateTexture(u32 width, u32 height, const void* initial_data,
@@ -194,7 +186,7 @@ bool D3D11HostDisplay::SupportsDisplayPixelFormat(HostDisplayPixelFormat format)
 
   UINT support = 0;
   const UINT required = D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_SHADER_SAMPLE;
-  return (SUCCEEDED(m_device->CheckFormatSupport(dfmt, &support) && ((support & required) == required)));
+  return (SUCCEEDED(m_device->CheckFormatSupport(dfmt, &support)) && ((support & required) == required));
 }
 
 bool D3D11HostDisplay::BeginSetDisplayPixels(HostDisplayPixelFormat format, u32 width, u32 height, void** out_buffer,
@@ -206,7 +198,7 @@ bool D3D11HostDisplay::BeginSetDisplayPixels(HostDisplayPixelFormat format, u32 
   if (m_display_pixels_texture.GetWidth() < width || m_display_pixels_texture.GetHeight() < height ||
       m_display_pixels_texture.GetFormat() != dxgi_format)
   {
-    if (!m_display_pixels_texture.Create(m_device.Get(), width, height, 1, dxgi_format, D3D11_BIND_SHADER_RESOURCE,
+    if (!m_display_pixels_texture.Create(m_device.Get(), width, height, 1, 1, dxgi_format, D3D11_BIND_SHADER_RESOURCE,
                                          nullptr, 0, true))
     {
       return false;
@@ -236,14 +228,12 @@ void D3D11HostDisplay::EndSetDisplayPixels()
 
 void D3D11HostDisplay::SetVSync(bool enabled)
 {
-#ifndef LIBRETRO
   m_vsync = enabled;
-#endif
 }
 
-bool D3D11HostDisplay::CreateRenderDevice(const WindowInfo& wi, std::string_view adapter_name, bool debug_device)
+bool D3D11HostDisplay::CreateRenderDevice(const WindowInfo& wi, std::string_view adapter_name, bool debug_device,
+                                          bool threaded_presentation)
 {
-#ifndef LIBRETRO
   UINT create_flags = 0;
   if (debug_device)
     create_flags |= D3D11_CREATE_DEVICE_DEBUG;
@@ -346,21 +336,16 @@ bool D3D11HostDisplay::CreateRenderDevice(const WindowInfo& wi, std::string_view
     if (SUCCEEDED(hr))
       m_allow_tearing_supported = (allow_tearing_supported == TRUE);
   }
-#endif
 
   m_window_info = wi;
   return true;
 }
 
-bool D3D11HostDisplay::InitializeRenderDevice(std::string_view shader_cache_directory, bool debug_device)
+bool D3D11HostDisplay::InitializeRenderDevice(std::string_view shader_cache_directory, bool debug_device,
+                                              bool threaded_presentation)
 {
-#ifndef LIBRETRO
-  if (m_window_info.type != WindowInfo::Type::Surfaceless && m_window_info.type != WindowInfo::Type::Libretro &&
-      !CreateSwapChain(nullptr))
-  {
+  if (m_window_info.type != WindowInfo::Type::Surfaceless && !CreateSwapChain(nullptr))
     return false;
-  }
-#endif
 
   if (!CreateResources())
     return false;
@@ -395,8 +380,6 @@ bool D3D11HostDisplay::DoneRenderContextCurrent()
 {
   return true;
 }
-
-#ifndef LIBRETRO
 
 bool D3D11HostDisplay::CreateSwapChain(const DXGI_MODE_DESC* fullscreen_mode)
 {
@@ -487,44 +470,36 @@ bool D3D11HostDisplay::CreateSwapChainRTV()
   m_window_info.surface_width = backbuffer_desc.Width;
   m_window_info.surface_height = backbuffer_desc.Height;
 
+#ifdef WITH_IMGUI
   if (ImGui::GetCurrentContext())
   {
     ImGui::GetIO().DisplaySize.x = static_cast<float>(backbuffer_desc.Width);
     ImGui::GetIO().DisplaySize.y = static_cast<float>(backbuffer_desc.Height);
   }
+#endif
 
   return true;
 }
 
-#endif
-
 bool D3D11HostDisplay::ChangeRenderWindow(const WindowInfo& new_wi)
 {
-#ifndef LIBRETRO
   DestroyRenderSurface();
 
   m_window_info = new_wi;
   return CreateSwapChain(nullptr);
-#else
-  m_window_info = new_wi;
-  return true;
-#endif
 }
 
 void D3D11HostDisplay::DestroyRenderSurface()
 {
-#ifndef LIBRETRO
   if (IsFullscreen())
     SetFullscreen(false, 0, 0, 0.0f);
 
   m_swap_chain_rtv.Reset();
   m_swap_chain.Reset();
-#endif
 }
 
 void D3D11HostDisplay::ResizeRenderWindow(s32 new_window_width, s32 new_window_height)
 {
-#ifndef LIBRETRO
   if (!m_swap_chain)
     return;
 
@@ -537,31 +512,21 @@ void D3D11HostDisplay::ResizeRenderWindow(s32 new_window_width, s32 new_window_h
 
   if (!CreateSwapChainRTV())
     Panic("Failed to recreate swap chain RTV after resize");
-#endif
 }
 
 bool D3D11HostDisplay::SupportsFullscreen() const
 {
-#ifndef LIBRETRO
   return true;
-#else
-  return false;
-#endif
 }
 
 bool D3D11HostDisplay::IsFullscreen()
 {
-#ifndef LIBRETRO
   BOOL is_fullscreen = FALSE;
   return (m_swap_chain && SUCCEEDED(m_swap_chain->GetFullscreenState(&is_fullscreen, nullptr)) && is_fullscreen);
-#else
-  return false;
-#endif
 }
 
 bool D3D11HostDisplay::SetFullscreen(bool fullscreen, u32 width, u32 height, float refresh_rate)
 {
-#ifndef LIBRETRO
   if (!m_swap_chain)
     return false;
 
@@ -620,9 +585,6 @@ bool D3D11HostDisplay::SetFullscreen(bool fullscreen, u32 width, u32 height, flo
   }
 
   return true;
-#else
-  return false;
-#endif
 }
 
 bool D3D11HostDisplay::CreateResources()
@@ -685,11 +647,9 @@ bool D3D11HostDisplay::CreateResources()
 
 void D3D11HostDisplay::DestroyResources()
 {
-#ifndef LIBRETRO
   m_post_processing_chain.ClearStages();
   m_post_processing_input_texture.Destroy();
   m_post_processing_stages.clear();
-#endif
 
   m_display_uniform_buffer.Release();
   m_linear_sampler.Reset();
@@ -724,7 +684,6 @@ void D3D11HostDisplay::DestroyImGuiContext()
 
 bool D3D11HostDisplay::Render()
 {
-#ifndef LIBRETRO
   if (ShouldSkipDisplayingFrame())
   {
 #ifdef WITH_IMGUI
@@ -761,8 +720,6 @@ bool D3D11HostDisplay::Render()
     ImGui_ImplDX11_NewFrame();
 #endif
 
-#endif
-
   return true;
 }
 
@@ -781,7 +738,6 @@ void D3D11HostDisplay::RenderDisplay()
 
   const auto [left, top, width, height] = CalculateDrawRect(GetWindowWidth(), GetWindowHeight(), m_display_top_margin);
 
-#ifndef LIBRETRO
   if (!m_post_processing_chain.IsEmpty())
   {
     ApplyPostProcessingChain(m_swap_chain_rtv.Get(), left, top, width, height, m_display_texture_handle,
@@ -789,7 +745,6 @@ void D3D11HostDisplay::RenderDisplay()
                              m_display_texture_view_y, m_display_texture_view_width, m_display_texture_view_height);
     return;
   }
-#endif
 
   RenderDisplay(left, top, width, height, m_display_texture_handle, m_display_texture_width, m_display_texture_height,
                 m_display_texture_view_x, m_display_texture_view_y, m_display_texture_view_width,
@@ -806,10 +761,13 @@ void D3D11HostDisplay::RenderDisplay(s32 left, s32 top, s32 width, s32 height, v
   m_context->PSSetShaderResources(0, 1, reinterpret_cast<ID3D11ShaderResourceView**>(&texture_handle));
   m_context->PSSetSamplers(0, 1, linear_filter ? m_linear_sampler.GetAddressOf() : m_point_sampler.GetAddressOf());
 
-  const float uniforms[4] = {static_cast<float>(texture_view_x) / static_cast<float>(texture_width),
-                             static_cast<float>(texture_view_y) / static_cast<float>(texture_height),
-                             (static_cast<float>(texture_view_width) - 0.5f) / static_cast<float>(texture_width),
-                             (static_cast<float>(texture_view_height) - 0.5f) / static_cast<float>(texture_height)};
+  const float position_adjust = m_display_linear_filtering ? 0.5f : 0.0f;
+  const float size_adjust = m_display_linear_filtering ? 1.0f : 0.0f;
+  const float uniforms[4] = {
+    (static_cast<float>(texture_view_x) + position_adjust) / static_cast<float>(texture_width),
+    (static_cast<float>(texture_view_y) + position_adjust) / static_cast<float>(texture_height),
+    (static_cast<float>(texture_view_width) - size_adjust) / static_cast<float>(texture_width),
+    (static_cast<float>(texture_view_height) - size_adjust) / static_cast<float>(texture_height)};
   const auto map = m_display_uniform_buffer.Map(m_context.Get(), m_display_uniform_buffer.GetSize(), sizeof(uniforms));
   std::memcpy(map.pointer, uniforms, sizeof(uniforms));
   m_display_uniform_buffer.Unmap(m_context.Get(), sizeof(uniforms));
@@ -858,8 +816,6 @@ void D3D11HostDisplay::RenderSoftwareCursor(s32 left, s32 top, s32 width, s32 he
 
   m_context->Draw(3, 0);
 }
-
-#ifndef LIBRETRO
 
 D3D11HostDisplay::AdapterInfo D3D11HostDisplay::GetAdapterInfo()
 {
@@ -1005,7 +961,7 @@ bool D3D11HostDisplay::CheckPostProcessingRenderTargets(u32 target_width, u32 ta
   if (m_post_processing_input_texture.GetWidth() != target_width ||
       m_post_processing_input_texture.GetHeight() != target_height)
   {
-    if (!m_post_processing_input_texture.Create(m_device.Get(), target_width, target_height, 1, format, bind_flags))
+    if (!m_post_processing_input_texture.Create(m_device.Get(), target_width, target_height, 1, 1, format, bind_flags))
       return false;
   }
 
@@ -1015,7 +971,7 @@ bool D3D11HostDisplay::CheckPostProcessingRenderTargets(u32 target_width, u32 ta
     PostProcessingStage& pps = m_post_processing_stages[i];
     if (pps.output_texture.GetWidth() != target_width || pps.output_texture.GetHeight() != target_height)
     {
-      if (!pps.output_texture.Create(m_device.Get(), target_width, target_height, 1, format, bind_flags))
+      if (!pps.output_texture.Create(m_device.Get(), target_width, target_height, 1, 1, format, bind_flags))
         return false;
     }
   }
@@ -1089,14 +1045,5 @@ void D3D11HostDisplay::ApplyPostProcessingChain(ID3D11RenderTargetView* final_ta
   ID3D11ShaderResourceView* null_srv = nullptr;
   m_context->PSSetShaderResources(0, 1, &null_srv);
 }
-
-#else // LIBRETRO
-
-bool D3D11HostDisplay::SetPostProcessingChain(const std::string_view& config)
-{
-  return false;
-}
-
-#endif
 
 } // namespace FrontendCommon

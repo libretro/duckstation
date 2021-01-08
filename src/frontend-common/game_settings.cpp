@@ -11,12 +11,10 @@
 #include <utility>
 Log_SetChannel(GameSettings);
 
-#ifndef LIBRETRO
 #ifdef WIN32
 #include "common/windows_headers.h"
 #endif
 #include "SimpleIni.h"
-#endif
 
 namespace GameSettings {
 
@@ -119,6 +117,7 @@ bool Entry::LoadFromStream(ByteStream* stream)
       !ReadOptionalFromStream(stream, &gpu_pgxp_tolerance) ||
       !ReadOptionalFromStream(stream, &gpu_pgxp_depth_threshold) ||
       !ReadOptionalFromStream(stream, &display_crop_mode) || !ReadOptionalFromStream(stream, &display_aspect_ratio) ||
+      !ReadOptionalFromStream(stream, &gpu_downsample_mode) ||
       !ReadOptionalFromStream(stream, &display_linear_upscaling) ||
       !ReadOptionalFromStream(stream, &display_integer_upscaling) ||
       !ReadOptionalFromStream(stream, &display_force_4_3_for_24bit) ||
@@ -167,7 +166,7 @@ bool Entry::SaveToStream(ByteStream* stream) const
          WriteOptionalToStream(stream, dma_halt_ticks) && WriteOptionalToStream(stream, gpu_fifo_size) &&
          WriteOptionalToStream(stream, gpu_max_run_ahead) && WriteOptionalToStream(stream, gpu_pgxp_tolerance) &&
          WriteOptionalToStream(stream, gpu_pgxp_depth_threshold) && WriteOptionalToStream(stream, display_crop_mode) &&
-         WriteOptionalToStream(stream, display_aspect_ratio) &&
+         WriteOptionalToStream(stream, display_aspect_ratio) && WriteOptionalToStream(stream, gpu_downsample_mode) &&
          WriteOptionalToStream(stream, display_linear_upscaling) &&
          WriteOptionalToStream(stream, display_integer_upscaling) &&
          WriteOptionalToStream(stream, display_force_4_3_for_24bit) &&
@@ -181,8 +180,6 @@ bool Entry::SaveToStream(ByteStream* stream) const
          WriteStringToStream(stream, memory_card_1_shared_path) &&
          WriteStringToStream(stream, memory_card_2_shared_path) && WriteStringToStream(stream, input_profile_name);
 }
-
-#ifndef LIBRETRO
 
 static void ParseIniSection(Entry* entry, const char* section, const CSimpleIniA& ini)
 {
@@ -243,6 +240,9 @@ static void ParseIniSection(Entry* entry, const char* section, const CSimpleIniA
   cvalue = ini.GetValue(section, "DisplayAspectRatio", nullptr);
   if (cvalue)
     entry->display_aspect_ratio = Settings::ParseDisplayAspectRatio(cvalue);
+  cvalue = ini.GetValue(section, "GPUDownsampleMode", nullptr);
+  if (cvalue)
+    entry->gpu_downsample_mode = Settings::ParseDownsampleModeName(cvalue);
   cvalue = ini.GetValue(section, "DisplayLinearUpscaling", nullptr);
   if (cvalue)
     entry->display_linear_upscaling = StringUtil::FromChars<bool>(cvalue);
@@ -354,6 +354,10 @@ static void StoreIniSection(const Entry& entry, const char* section, CSimpleIniA
     ini.SetValue(section, "DisplayAspectRatio",
                  Settings::GetDisplayAspectRatioName(entry.display_aspect_ratio.value()));
   }
+  if (entry.gpu_downsample_mode.has_value())
+  {
+    ini.SetValue(section, "GPUDownsampleMode", Settings::GetDownsampleModeName(entry.gpu_downsample_mode.value()));
+  }
   if (entry.display_linear_upscaling.has_value())
     ini.SetValue(section, "DisplayLinearUpscaling", entry.display_linear_upscaling.value() ? "true" : "false");
   if (entry.display_integer_upscaling.has_value())
@@ -401,6 +405,391 @@ static void StoreIniSection(const Entry& entry, const char* section, CSimpleIniA
     ini.SetValue(section, "MemoryCard2SharedPath", entry.memory_card_2_shared_path.c_str());
   if (!entry.input_profile_name.empty())
     ini.SetValue(section, "InputProfileName", entry.input_profile_name.c_str());
+}
+
+static std::optional<std::string> GetEntryValueForKey(const Entry& entry, const std::string_view& key)
+{
+  if (key == "CPUOverclock")
+  {
+    if (!entry.cpu_overclock_enable.has_value())
+      return std::nullopt;
+
+    return std::to_string(Settings::CPUOverclockFractionToPercent(entry.cpu_overclock_numerator.value_or(1),
+                                                                  entry.cpu_overclock_denominator.value_or(1)));
+  }
+  else if (key == "CDROMReadSpeedup")
+  {
+    if (!entry.cdrom_read_speedup.has_value())
+      return std::nullopt;
+    else
+      return std::to_string(entry.cdrom_read_speedup.value());
+  }
+  else if (key == "DisplayCropMode")
+  {
+    if (!entry.display_crop_mode.has_value())
+      return std::nullopt;
+    else
+      return Settings::GetDisplayCropModeName(entry.display_crop_mode.value());
+  }
+  else if (key == "DisplayAspectRatio")
+  {
+    if (!entry.display_aspect_ratio.has_value())
+      return std::nullopt;
+    else
+      return Settings::GetDisplayAspectRatioName(entry.display_aspect_ratio.value());
+  }
+  else if (key == "GPUDownsampleMode")
+  {
+    if (!entry.gpu_downsample_mode.has_value())
+      return std::nullopt;
+    else
+      return Settings::GetDownsampleModeName(entry.gpu_downsample_mode.value());
+  }
+  else if (key == "DisplayLinearUpscaling")
+  {
+    if (!entry.display_linear_upscaling.has_value())
+      return std::nullopt;
+    else
+      return entry.display_linear_upscaling ? "true" : "false";
+  }
+  else if (key == "DisplayIntegerUpscaling")
+  {
+    if (!entry.display_integer_upscaling.has_value())
+      return std::nullopt;
+    else
+      return entry.display_integer_upscaling ? "true" : "false";
+  }
+  else if (key == "DisplayForce4_3For24Bit")
+  {
+    if (!entry.display_force_4_3_for_24bit.has_value())
+      return std::nullopt;
+    else
+      return entry.display_force_4_3_for_24bit ? "true" : "false";
+  }
+  else if (key == "GPUResolutionScale")
+  {
+    if (!entry.gpu_resolution_scale.has_value())
+      return std::nullopt;
+    else
+      return std::to_string(entry.gpu_resolution_scale.value());
+  }
+  else if (key == "GPUMSAA")
+  {
+    if (!entry.gpu_multisamples.has_value())
+    {
+      return std::nullopt;
+    }
+    else
+    {
+      return StringUtil::StdStringFromFormat("%u%s", entry.gpu_multisamples.value(),
+                                             entry.gpu_multisamples.value_or(false) ? "-ssaa" : "");
+    }
+  }
+  else if (key == "GPUTrueColor")
+  {
+    if (!entry.gpu_true_color.has_value())
+      return std::nullopt;
+    else
+      return entry.gpu_true_color ? "true" : "false";
+  }
+  else if (key == "GPUScaledDithering")
+  {
+    if (!entry.gpu_scaled_dithering.has_value())
+      return std::nullopt;
+    else
+      return entry.gpu_scaled_dithering ? "true" : "false";
+  }
+  else if (key == "GPUTextureFilter")
+  {
+    if (!entry.gpu_texture_filter.has_value())
+      return std::nullopt;
+    else
+      return entry.gpu_texture_filter ? "true" : "false";
+  }
+  else if (key == "GPUForceNTSCTimings")
+  {
+    if (!entry.gpu_force_ntsc_timings.has_value())
+      return std::nullopt;
+    else
+      return entry.gpu_force_ntsc_timings ? "true" : "false";
+  }
+  else if (key == "GPUWidescreenHack")
+  {
+    if (!entry.gpu_widescreen_hack.has_value())
+      return std::nullopt;
+    else
+      return entry.gpu_widescreen_hack ? "true" : "false";
+  }
+  else if (key == "GPUPGXP")
+  {
+    if (!entry.gpu_pgxp.has_value())
+      return std::nullopt;
+    else
+      return entry.gpu_pgxp ? "true" : "false";
+  }
+  else if (key == "GPUPGXPDepthBuffer")
+  {
+    if (!entry.gpu_pgxp_depth_buffer.has_value())
+      return std::nullopt;
+    else
+      return entry.gpu_pgxp_depth_buffer ? "true" : "false";
+  }
+  else if (key == "Controller1Type")
+  {
+    if (!entry.controller_1_type.has_value())
+      return std::nullopt;
+    else
+      return Settings::GetControllerTypeName(entry.controller_1_type.value());
+  }
+  else if (key == "Controller2Type")
+  {
+    if (!entry.controller_2_type.has_value())
+      return std::nullopt;
+    else
+      return Settings::GetControllerTypeName(entry.controller_2_type.value());
+  }
+  else if (key == "MemoryCard1Type")
+  {
+    if (!entry.memory_card_1_type.has_value())
+      return std::nullopt;
+    else
+      return Settings::GetMemoryCardTypeName(entry.memory_card_1_type.value());
+  }
+  else if (key == "MemoryCard2Type")
+  {
+    if (!entry.memory_card_2_type.has_value())
+      return std::nullopt;
+    else
+      return Settings::GetMemoryCardTypeName(entry.memory_card_2_type.value());
+  }
+  else if (key == "MemoryCard1SharedPath")
+  {
+    if (entry.memory_card_1_shared_path.empty())
+      return std::nullopt;
+    else
+      return entry.memory_card_1_shared_path;
+  }
+  else if (key == "MemoryCard2SharedPath")
+  {
+    if (entry.memory_card_2_shared_path.empty())
+      return std::nullopt;
+    else
+      return entry.memory_card_2_shared_path;
+  }
+  else if (key == "InputProfileName")
+  {
+    if (entry.input_profile_name.empty())
+      return std::nullopt;
+    else
+      return entry.input_profile_name;
+  }
+  else
+  {
+    Log_ErrorPrintf("Unknown key: %s", std::string(key).c_str());
+    return std::nullopt;
+  }
+}
+
+static void SetEntryValueForKey(Entry& entry, const std::string_view& key, const std::optional<std::string>& value)
+{
+  if (key == "CPUOverclock")
+  {
+    if (!value.has_value())
+    {
+      entry.cpu_overclock_numerator.reset();
+      entry.cpu_overclock_denominator.reset();
+      entry.cpu_overclock_enable.reset();
+    }
+    else
+    {
+      u32 numerator, denominator;
+      Settings::CPUOverclockPercentToFraction(StringUtil::FromChars<u32>(value.value()).value_or(100), &numerator,
+                                              &denominator);
+      entry.cpu_overclock_numerator = numerator;
+      entry.cpu_overclock_denominator = denominator;
+      entry.cpu_overclock_enable = true;
+    }
+  }
+  else if (key == "CDROMReadSpeedup")
+  {
+    if (!value.has_value())
+      entry.cdrom_read_speedup.reset();
+    else
+      entry.cdrom_read_speedup = StringUtil::FromChars<u32>(value.value());
+  }
+  else if (key == "DisplayCropMode")
+  {
+    if (!value.has_value())
+      entry.display_crop_mode.reset();
+    else
+      entry.display_crop_mode = Settings::ParseDisplayCropMode(value->c_str());
+  }
+  else if (key == "DisplayAspectRatio")
+  {
+    if (!value.has_value())
+      entry.display_aspect_ratio.reset();
+    else
+      entry.display_aspect_ratio = Settings::ParseDisplayAspectRatio(value->c_str());
+  }
+  else if (key == "GPUDownsampleMode")
+  {
+    if (!value.has_value())
+      entry.gpu_downsample_mode.reset();
+    else
+      entry.gpu_downsample_mode = Settings::ParseDownsampleModeName(value->c_str());
+  }
+  else if (key == "DisplayLinearUpscaling")
+  {
+    if (!value.has_value())
+      entry.display_linear_upscaling.reset();
+    else
+      entry.display_linear_upscaling = StringUtil::FromChars<bool>(value.value());
+  }
+  else if (key == "DisplayIntegerUpscaling")
+  {
+    if (!value.has_value())
+      entry.display_integer_upscaling.reset();
+    else
+      entry.display_integer_upscaling = StringUtil::FromChars<bool>(value.value());
+  }
+  else if (key == "DisplayForce4_3For24Bit")
+  {
+    if (!value.has_value())
+      entry.display_force_4_3_for_24bit.reset();
+    else
+      entry.display_force_4_3_for_24bit = StringUtil::FromChars<bool>(value.value());
+  }
+  else if (key == "GPUResolutionScale")
+  {
+    if (!value.has_value())
+      entry.gpu_resolution_scale.reset();
+    else
+      entry.gpu_resolution_scale = StringUtil::FromChars<u32>(value.value());
+  }
+  else if (key == "GPUMSAA")
+  {
+    if (!value.has_value())
+    {
+      entry.gpu_multisamples.reset();
+      entry.gpu_per_sample_shading.reset();
+    }
+    else
+    {
+      if (StringUtil::EndsWith(value.value(), "-ssaa"))
+      {
+        entry.gpu_multisamples =
+          StringUtil::FromChars<u32>(std::string_view(value.value()).substr(0, value->length() - 5));
+        entry.gpu_per_sample_shading = true;
+      }
+      else
+      {
+        entry.gpu_multisamples = StringUtil::FromChars<u32>(value.value());
+        entry.gpu_per_sample_shading = false;
+      }
+    }
+  }
+  else if (key == "GPUTrueColor")
+  {
+    if (!value.has_value())
+      entry.gpu_true_color.reset();
+    else
+      entry.gpu_true_color = StringUtil::FromChars<bool>(value.value());
+  }
+  else if (key == "GPUScaledDithering")
+  {
+    if (!value.has_value())
+      entry.gpu_scaled_dithering.reset();
+    else
+      entry.gpu_scaled_dithering = StringUtil::FromChars<bool>(value.value());
+  }
+  else if (key == "GPUTextureFilter")
+  {
+    if (!value.has_value())
+      entry.gpu_texture_filter.reset();
+    else
+      entry.gpu_texture_filter = Settings::ParseTextureFilterName(value->c_str());
+  }
+  else if (key == "GPUForceNTSCTimings")
+  {
+    if (!value.has_value())
+      entry.gpu_force_ntsc_timings.reset();
+    else
+      entry.gpu_force_ntsc_timings = StringUtil::FromChars<bool>(value.value());
+  }
+  else if (key == "GPUWidescreenHack")
+  {
+    if (!value.has_value())
+      entry.gpu_widescreen_hack.reset();
+    else
+      entry.gpu_widescreen_hack = StringUtil::FromChars<bool>(value.value());
+  }
+  else if (key == "GPUPGXP")
+  {
+    if (!value.has_value())
+      entry.gpu_pgxp.reset();
+    else
+      entry.gpu_pgxp = StringUtil::FromChars<bool>(value.value());
+  }
+  else if (key == "GPUPGXPDepthBuffer")
+  {
+    if (!value.has_value())
+      entry.gpu_pgxp_depth_buffer.reset();
+    else
+      entry.gpu_pgxp_depth_buffer = StringUtil::FromChars<bool>(value.value());
+  }
+  else if (key == "Controller1Type")
+  {
+    if (!value.has_value())
+      entry.controller_1_type.reset();
+    else
+      entry.controller_1_type = Settings::ParseControllerTypeName(value->c_str());
+  }
+  else if (key == "Controller2Type")
+  {
+    if (!value.has_value())
+      entry.controller_2_type.reset();
+    else
+      entry.controller_2_type = Settings::ParseControllerTypeName(value->c_str());
+  }
+  else if (key == "MemoryCard1Type")
+  {
+    if (!value.has_value())
+      entry.memory_card_1_type.reset();
+    else
+      entry.memory_card_1_type = Settings::ParseMemoryCardTypeName(value->c_str());
+  }
+  else if (key == "MemoryCard2Type")
+  {
+    if (!value.has_value())
+      entry.memory_card_2_type.reset();
+    else
+      entry.memory_card_2_type = Settings::ParseMemoryCardTypeName(value->c_str());
+  }
+  else if (key == "MemoryCard1SharedPath")
+  {
+    if (!value.has_value())
+      entry.memory_card_1_shared_path.clear();
+    else
+      entry.memory_card_1_shared_path = value.value();
+  }
+  else if (key == "MemoryCard2SharedPath")
+  {
+    if (!value.has_value())
+      entry.memory_card_1_shared_path.clear();
+    else
+      entry.memory_card_1_shared_path = value.value();
+  }
+  else if (key == "InputProfileName")
+  {
+    if (!value.has_value())
+      entry.input_profile_name.clear();
+    else
+      entry.input_profile_name = value.value();
+  }
+  else
+  {
+    Log_ErrorPrintf("Unknown key: %s", std::string(key).c_str());
+  }
 }
 
 Database::Database() = default;
@@ -494,7 +883,15 @@ void Database::SetEntry(const std::string& code, const std::string& name, const 
     m_entries.emplace(code, entry);
 }
 
-#endif
+std::optional<std::string> Entry::GetValueForKey(const std::string_view& key) const
+{
+  return GetEntryValueForKey(*this, key);
+}
+
+void Entry::SetValueForKey(const std::string_view& key, const std::optional<std::string>& value)
+{
+  SetEntryValueForKey(*this, key, value);
+}
 
 void Entry::ApplySettings(bool display_osd_messages) const
 {
@@ -536,6 +933,8 @@ void Entry::ApplySettings(bool display_osd_messages) const
     g_settings.display_crop_mode = display_crop_mode.value();
   if (display_aspect_ratio.has_value())
     g_settings.display_aspect_ratio = display_aspect_ratio.value();
+  if (gpu_downsample_mode.has_value())
+    g_settings.gpu_downsample_mode = gpu_downsample_mode.value();
   if (display_linear_upscaling.has_value())
     g_settings.display_linear_filtering = display_linear_upscaling.value();
   if (display_integer_upscaling.has_value())

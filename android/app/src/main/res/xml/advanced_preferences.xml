@@ -23,6 +23,12 @@
         app:entryValues="@array/settings_language_values"
         app:useSimpleSummaryProvider="true"
         app:iconSpaceReserved="false" />
+    <SwitchPreferenceCompat
+        app:key="Main/DisableAllEnhancements"
+        app:title="@string/settings_disable_all_enhancements"
+        app:defaultValue="false"
+        app:summary="@string/settings_summary_disable_all_enhancements"
+        app:iconSpaceReserved="false" />
     <ListPreference
         app:key="CPU/Overclock"
         app:title="@string/settings_cpu_overclocking"
@@ -48,6 +54,12 @@
         app:title="@string/settings_gpu_thread"
         app:defaultValue="true"
         app:summary="@string/settings_summary_gpu_thread"
+        app:iconSpaceReserved="false" />
+    <SwitchPreferenceCompat
+        app:key="GPU/ThreadedPresentation"
+        app:title="@string/settings_gpu_threaded_presentation"
+        app:defaultValue="true"
+        app:summary="@string/settings_summary_gpu_threaded_presentation"
         app:iconSpaceReserved="false" />
     <SwitchPreferenceCompat
         app:key="GPU/PGXPVertexCache"

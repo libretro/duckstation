@@ -31,6 +31,9 @@ public:
   explicit MainWindow(QtHostInterface* host_interface);
   ~MainWindow();
 
+  /// Initializes the window. Call once at startup.
+  void initializeAndShow();
+
   /// Performs update check if enabled in settings.
   void startupUpdateCheck();
 
@@ -47,12 +50,13 @@ private Q_SLOTS:
   void reportError(const QString& message);
   void reportMessage(const QString& message);
   bool confirmMessage(const QString& message);
-  QtDisplayWidget* createDisplay(QThread* worker_thread, const QString& adapter_name, bool use_debug_device,
-                                 bool fullscreen, bool render_to_main);
+  QtDisplayWidget* createDisplay(QThread* worker_thread, bool fullscreen, bool render_to_main);
   QtDisplayWidget* updateDisplay(QThread* worker_thread, bool fullscreen, bool render_to_main);
   void displaySizeRequested(qint32 width, qint32 height);
   void destroyDisplay();
   void focusDisplayWidget();
+  void onMouseModeRequested(bool relative_mode, bool hide_cursor);
+  void updateMouseMode(bool paused);
 
   void setTheme(const QString& theme);
   void updateTheme();
@@ -88,16 +92,17 @@ private Q_SLOTS:
   void onCheckForUpdatesActionTriggered();
   void onToolsMemoryCardEditorTriggered();
   void onToolsCheatManagerTriggered();
-  void onToolsCPUDebuggerTriggered();
   void onToolsOpenDataDirectoryTriggered();
 
   void onGameListEntrySelected(const GameListEntry* entry);
   void onGameListEntryDoubleClicked(const GameListEntry* entry);
   void onGameListContextMenuRequested(const QPoint& point, const GameListEntry* entry);
   void onGameListSetCoverImageRequested(const GameListEntry* entry);
-  void onCPUDebuggerClosed();
 
   void onUpdateCheckComplete();
+
+  void openCPUDebugger();
+  void onCPUDebuggerClosed();
 
 protected:
   void closeEvent(QCloseEvent* event) override;
@@ -147,6 +152,9 @@ private:
 
   bool m_emulation_running = false;
   bool m_was_paused_by_focus_loss = false;
+  bool m_open_debugger_on_start = false;
+  bool m_relative_mouse_mode = false;
+  bool m_mouse_cursor_hidden = false;
 
   GDBServer* m_gdb_server = nullptr;
 };

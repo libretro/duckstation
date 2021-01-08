@@ -9,6 +9,7 @@
 #include "gpu.h"
 #include "interrupt_controller.h"
 #include "mdec.h"
+#include "pad.h"
 #include "spu.h"
 #include "system.h"
 #ifdef WITH_IMGUI
@@ -36,10 +37,17 @@ void DMA::Initialize()
 
 void DMA::Shutdown()
 {
+  ClearState();
   m_unhalt_event.reset();
 }
 
 void DMA::Reset()
+{
+  ClearState();
+  m_unhalt_event->Deactivate();
+}
+
+void DMA::ClearState()
 {
   for (u32 i = 0; i < NUM_CHANNELS; i++)
   {
@@ -54,7 +62,6 @@ void DMA::Reset()
   m_DICR.bits = 0;
 
   m_halt_ticks_remaining = 0;
-  m_unhalt_event->Deactivate();
 }
 
 bool DMA::DoState(StateWrapper& sw)
@@ -247,6 +254,34 @@ void DMA::UpdateIRQ()
   }
 }
 
+// Plenty of games seem to suffer from this issue where they have a linked list DMA going while polling the
+// controller. Using a too-large slice size will result in the serial timing being off, and the game thinking
+// the controller is disconnected. So we don't hurt performance too much for the general case, we reduce this
+// to equal CPU and DMA time when the controller is transferring, but otherwise leave it at the higher size.
+enum : u32
+{
+  SLICE_SIZE_WHEN_TRANSMITTING_PAD = 100,
+  HALT_TICKS_WHEN_TRANSMITTING_PAD = 100
+};
+
+TickCount DMA::GetTransferSliceTicks() const
+{
+#ifdef _DEBUG
+  if (g_pad.IsTransmitting())
+  {
+    Log_DebugPrintf("DMA transfer while transmitting pad - using lower slice size of %u vs %u",
+                    SLICE_SIZE_WHEN_TRANSMITTING_PAD, m_max_slice_ticks);
+  }
+#endif
+
+  return g_pad.IsTransmitting() ? SLICE_SIZE_WHEN_TRANSMITTING_PAD : m_max_slice_ticks;
+}
+
+TickCount DMA::GetTransferHaltTicks() const
+{
+  return g_pad.IsTransmitting() ? HALT_TICKS_WHEN_TRANSMITTING_PAD : m_halt_ticks;
+}
+
 bool DMA::TransferChannel(Channel channel)
 {
   ChannelState& cs = m_state[static_cast<u32>(channel)];
@@ -278,7 +313,6 @@ bool DMA::TransferChannel(Channel channel)
 
     case SyncMode::LinkedList:
     {
-      TickCount used_ticks = 0;
       if (!copy_to_device)
       {
         Panic("Linked list not implemented for DMA reads");
@@ -289,12 +323,13 @@ bool DMA::TransferChannel(Channel channel)
                       current_address & ADDRESS_MASK);
 
       u8* ram_pointer = Bus::g_ram;
-      bool halt_transfer = false;
-      while (cs.request)
+      TickCount remaining_ticks = GetTransferSliceTicks();
+      while (cs.request && remaining_ticks > 0)
       {
         u32 header;
         std::memcpy(&header, &ram_pointer[current_address & ADDRESS_MASK], sizeof(header));
-        used_ticks += 10;
+        CPU::AddPendingTicks(10);
+        remaining_ticks -= 10;
 
         const u32 word_count = header >> 24;
         const u32 next_address = header & UINT32_C(0x00FFFFFF);
@@ -302,38 +337,29 @@ bool DMA::TransferChannel(Channel channel)
                         word_count * UINT32_C(4), word_count, next_address);
         if (word_count > 0)
         {
-          used_ticks += 5;
-          used_ticks +=
+          CPU::AddPendingTicks(5);
+          remaining_ticks -= 5;
+
+          const TickCount block_ticks =
             TransferMemoryToDevice(channel, (current_address + sizeof(header)) & ADDRESS_MASK, 4, word_count);
-        }
-        else if ((current_address & ADDRESS_MASK) == (next_address & ADDRESS_MASK))
-        {
-          current_address = next_address;
-          halt_transfer = true;
-          break;
+          CPU::AddPendingTicks(block_ticks);
+          remaining_ticks -= block_ticks;
         }
 
         current_address = next_address;
         if (current_address & UINT32_C(0x800000))
           break;
-
-        if (used_ticks >= m_max_slice_ticks)
-        {
-          halt_transfer = true;
-          break;
-        }
       }
 
       cs.base_address = current_address;
-      CPU::AddPendingTicks(used_ticks);
 
       if (current_address & UINT32_C(0x800000))
         break;
 
-      if (halt_transfer)
+      if (cs.request)
       {
         // stall the transfer for a bit if we ran for too long
-        HaltTransfer(m_halt_ticks);
+        HaltTransfer(GetTransferHaltTicks());
         return false;
       }
       else
@@ -353,34 +379,54 @@ bool DMA::TransferChannel(Channel channel)
 
       const u32 block_size = cs.block_control.request.GetBlockSize();
       u32 blocks_remaining = cs.block_control.request.GetBlockCount();
-      TickCount used_ticks = 0;
+      TickCount ticks_remaining = GetTransferSliceTicks();
 
       if (copy_to_device)
       {
         do
         {
           blocks_remaining--;
-          used_ticks += TransferMemoryToDevice(channel, current_address & ADDRESS_MASK, increment, block_size);
+
+          const TickCount ticks =
+            TransferMemoryToDevice(channel, current_address & ADDRESS_MASK, increment, block_size);
+          CPU::AddPendingTicks(ticks);
+          ticks_remaining -= ticks;
+
           current_address = (current_address + (increment * block_size));
-        } while (cs.request && blocks_remaining > 0);
+        } while (cs.request && blocks_remaining > 0 && ticks_remaining > 0);
       }
       else
       {
         do
         {
           blocks_remaining--;
-          used_ticks += TransferDeviceToMemory(channel, current_address & ADDRESS_MASK, increment, block_size);
+
+          const TickCount ticks =
+            TransferDeviceToMemory(channel, current_address & ADDRESS_MASK, increment, block_size);
+          CPU::AddPendingTicks(ticks);
+          ticks_remaining -= ticks;
+
           current_address = (current_address + (increment * block_size));
-        } while (cs.request && blocks_remaining > 0);
+        } while (cs.request && blocks_remaining > 0 && ticks_remaining > 0);
       }
 
       cs.base_address = current_address & BASE_ADDRESS_MASK;
       cs.block_control.request.block_count = blocks_remaining;
-      CPU::AddPendingTicks(used_ticks);
 
       // finish transfer later if the request was cleared
       if (blocks_remaining > 0)
+      {
+        if (cs.request)
+        {
+          // we got halted
+          if (!m_unhalt_event->IsActive())
+            HaltTransfer(GetTransferHaltTicks());
+
+          return false;
+        }
+
         return true;
+      }
     }
     break;
 

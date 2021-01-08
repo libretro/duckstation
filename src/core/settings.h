@@ -90,6 +90,7 @@ struct Settings
   bool load_devices_from_save_states = false;
   bool apply_game_settings = true;
   bool auto_load_cheats = false;
+  bool disable_all_enhancements = false;
 
   GPURenderer gpu_renderer = GPURenderer::Software;
   std::string gpu_adapter;
@@ -97,11 +98,13 @@ struct Settings
   u32 gpu_resolution_scale = 1;
   u32 gpu_multisamples = 1;
   bool gpu_use_thread = true;
+  bool gpu_threaded_presentation = true;
   bool gpu_use_debug_device = false;
   bool gpu_per_sample_shading = false;
   bool gpu_true_color = true;
   bool gpu_scaled_dithering = false;
   GPUTextureFilter gpu_texture_filter = GPUTextureFilter::Nearest;
+  GPUDownsampleMode gpu_downsample_mode = GPUDownsampleMode::Disabled;
   bool gpu_disable_interlacing = false;
   bool gpu_force_ntsc_timings = false;
   bool gpu_widescreen_hack = false;
@@ -283,6 +286,10 @@ struct Settings
   static const char* GetTextureFilterName(GPUTextureFilter filter);
   static const char* GetTextureFilterDisplayName(GPUTextureFilter filter);
 
+  static std::optional<GPUDownsampleMode> ParseDownsampleModeName(const char* str);
+  static const char* GetDownsampleModeName(GPUDownsampleMode mode);
+  static const char* GetDownsampleModeDisplayName(GPUDownsampleMode mode);
+
   static std::optional<DisplayCropMode> ParseDisplayCropMode(const char* str);
   static const char* GetDisplayCropModeName(DisplayCropMode crop_mode);
   static const char* GetDisplayCropModeDisplayName(DisplayCropMode crop_mode);
@@ -310,6 +317,7 @@ struct Settings
   static constexpr GPURenderer DEFAULT_GPU_RENDERER = GPURenderer::HardwareOpenGL;
 #endif
   static constexpr GPUTextureFilter DEFAULT_GPU_TEXTURE_FILTER = GPUTextureFilter::Nearest;
+  static constexpr GPUDownsampleMode DEFAULT_GPU_DOWNSAMPLE_MODE = GPUDownsampleMode::Disabled;
   static constexpr ConsoleRegion DEFAULT_CONSOLE_REGION = ConsoleRegion::Auto;
   static constexpr float DEFAULT_GPU_PGXP_DEPTH_THRESHOLD = 300.0f;
 

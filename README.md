@@ -1,9 +1,9 @@
 # DuckStation - PlayStation 1, aka. PSX Emulator
-[Latest News](#latest-news) | [Features](#features) | [Screenshots](#screenshots) | [Downloading and Running](#downloading-and-running) | [Libretro Core](#libretro-core) | [Building](#building) | [Disclaimers](#disclaimers)
+[Latest News](#latest-news) | [Features](#features) | [Screenshots](#screenshots) | [Downloading and Running](#downloading-and-running) | [Building](#building) | [Disclaimers](#disclaimers)
 
 **Discord Server:** https://discord.gg/Buktv3t
 
-**Latest Windows, Linux (AppImage), Mac, Android, and Libretro Builds:** https://github.com/stenzek/duckstation/releases/tag/latest
+**Latest Windows, Linux (AppImage), Mac, Android** https://github.com/stenzek/duckstation/releases/tag/latest
 
 **Available on Google Play:** https://play.google.com/store/apps/details?id=com.github.stenzek.duckstation&hl=en_AU&gl=US
 
@@ -18,6 +18,12 @@ A "BIOS" ROM image is required to to start the emulator and to play games. You c
 ## Latest News
 Older entries are available at https://github.com/stenzek/duckstation/blob/master/NEWS.md
 
+- 2020/01/03: Per game settings and game properties added to Android version.
+- 2020/12/30: Box and Adaptive downsampling modes added. Adaptive downsampling will smooth 2D backgrounds but attempt to preserve 3D geometry via pixel similarity (only supported in D3D11/Vulkan). Box is a simple average filter which will downsample to native resolution.
+- 2020/12/30: Hotkey binding added to Android version. You can now bind hotkeys such as fast forward, save state, etc to controller buttons. The ability to bind multi-button combinations will be added in the future.
+- 2020/12/29: Controller mapping/binding added for Android version. By default mappings will be clear and you will have to set them, you can do this from `Settings -> Controllers -> Controller Mapping`. Profiles can be saved and loaded as well.
+- 2020/12/29: Dark theme added for Android. By default it will follow your system theme (Android 10+), but can be overridden in settings.
+- 2020/12/29: DirectInput/DInput controller interface added for Windows. You can use this if you are having difficulties with SDL. Vibration is not supported yet.
 - 2020/12/25: Partial texture replacement support added. For now, this is only applicable to a small number of games which upload backgrounds to video RAM every frame. Dumping and replacement options are available in `Advanced Settings`.
 - 2020/12/22: PGXP Depth Buffer enhancement added. This enhancement can eliminate "polygon fighting" in games, by giving the PS1 the depth buffer it never had. Compatibility is rather low at the moment, but for the games it does work in, it works very well. The depth buffer will be made available to postprocessing shaders in the future, enabling  effects such as SSAO.
 - 2020/12/21: DuckStation now has two releases - Development and Preview. New features will appear in Preview first, and make their way to the Development release a few days later. To switch to preview, update to the latest development build (older builds will update to development), change the channel from `latest` to `preview` in general settings, and click `Check for Updates`.
@@ -26,7 +32,6 @@ Older entries are available at https://github.com/stenzek/duckstation/blob/maste
 - 2020/12/10: Translation support added for Android version. Currently Brazillian Portuguese, Italian, and Dutch are available.
 - 2020/11/27: Cover support added for game list in Android version. Procedure is the same as the desktop version, except you should place cover images in `<storage>/duckstation/covers` (see [Adding Game Covers](https://github.com/stenzek/duckstation/wiki/Adding-Game-Covers)).
 - 2020/11/27: Disc database is shipped with desktop and Android versions courtesy of redump.org. This will provide titles for games on Android, where it was not possible previously.
-- 2020/11/27: Compatibility databases added to libretro core - broken enhancements will be automatically disabled. You can turn this off by disabling "Apply Compatibility Settings" in the core options.
 - 2020/11/27: SDL game controller database is included with desktop versions courtesy of https://github.com/gabomdq/SDL_GameControllerDB.
 - 2020/11/21: OpenGL ES 2.0 host display support added. You cannot use the hardware renderer with GLES2, it still requires GLES3, but GLES2 GPUs can now use the software renderer.
 - 2020/11/21: Threaded renderer for software renderer added. Can result in a significant speed boost depending on the game.
@@ -49,6 +54,7 @@ Other features include:
  - Hardware (D3D11, OpenGL, Vulkan) and software rendering
  - Upscaling, texture filtering, and true colour (24-bit) in hardware renderers
  - PGXP for geometry precision, texture correction, and depth buffer emulation
+ - Adaptive downsampling filter
  - Post processing shader chains
  - "Fast boot" for skipping BIOS splash/intro
  - Save state support
@@ -60,7 +66,6 @@ Other features include:
  - Namco GunCon lightgun support (simulated with mouse)
  - NeGcon support
  - Qt and SDL frontends for desktop
- - libretro core for Windows and Linux
  - Automatic updates for Windows builds
  - Automatic content scanning - game titles/regions are provided by redump.org
  - Optional automatic switching of memory cards for each game
@@ -72,7 +77,7 @@ Other features include:
 ## System Requirements
  - A CPU faster than a potato. But it needs to be x86_64, AArch32/armv7, or AArch64/ARMv8, otherwise you won't get a recompiler and it'll be slow.
  - For the hardware renderers, a GPU capable of OpenGL 3.1/OpenGL ES 3.0/Direct3D 11 Feature Level 10.0 (or Vulkan 1.0) and above. So, basically anything made in the last 10 years or so.
- - SDL or XInput compatible game controller (e.g. XB360/XBOne). DualShock 3 users on Windows will need to install the official DualShock 3 drivers included as part of PlayStation Now.
+ - SDL, XInput or DInput compatible game controller (e.g. XB360/XBOne). DualShock 3 users on Windows will need to install the official DualShock 3 drivers included as part of PlayStation Now.
 
 ## Downloading and running
 Binaries of DuckStation for Windows x64/ARM64, x86_64 Linux x86_64 (in AppImage format), and Android ARMv8/AArch64 are available via GitHub Releases and are automatically built with every commit/push. Binaries or packages distributed through other sources may be out of date and are not supported by the developer.
@@ -131,6 +136,7 @@ To use:
  - Install and run the app for the first time.
  - This will create `/sdcard/duckstation`. Drop your BIOS files in `/sdcard/duckstation/bios`.
  - Add game directories by hitting the `+` icon and selecting a directory.
+ - Map your controller buttons and axes by going into `Controller Mapping` under `Controllers` in `Settings`.
  - Tap a game to start.
 
 
@@ -173,8 +179,10 @@ Requirements:
 Requirements (Debian/Ubuntu package names):
  - CMake (`cmake`)
  - SDL2 (`libsdl2-dev`)
- - GTK2.0 for file selector (`libgtk2.0-dev`)
+ - GTK3.0 for file selector (`libgtk-3-dev`)
+ - pkgconfig (`pkg-config`)
  - Qt 5 (`qtbase5-dev`, `qtbase5-private-dev`, `qtbase5-dev-tools`, `qttools5-dev`)
+ - git (`git`) (Note: needed to clone the repository and at build time)
  - Optional for faster building: Ninja (`ninja-build`)
 
 1. Clone the repository. Submodules aren't necessary, there is only one and it is only used for Windows (`git clone https://github.com/stenzek/duckstation.git -b dev`).
@@ -249,7 +257,7 @@ Controller 1:
  - **D-Pad:** W/A/S/D
  - **Triangle/Square/Circle/Cross:** Numpad8/Numpad4/Numpad6/Numpad2
  - **L1/R1:** Q/E
- - **L2/L2:** 1/3
+ - **L2/R2:** 1/3
  - **Start:** Enter
  - **Select:** Backspace
 
@@ -261,29 +269,6 @@ Hotkeys:
  - **Page Up/Down:** Increase/decrease resolution scale in hardware renderers
  - **End:** Toggle software renderer
  
-## Libretro Core
-
-DuckStation is available as a libretro core, which can be loaded into a frontend such as RetroArch. It supports most features of the full frontend, within the constraints and limitations of being a libretro core.
-
-Prebuilt binaries for 64-bit Windows, Linux and Android can be found on the releases page. Direct links:
-- 64-bit Windows: https://github.com/stenzek/duckstation/releases/download/latest/duckstation_libretro.dll.zip
-- 64-bit Linux: https://github.com/stenzek/duckstation/releases/download/latest/duckstation_libretro_x64.so.zip
-- armv7 Linux: https://github.com/stenzek/duckstation/releases/download/latest/duckstation_libretro_linux_armv7.so.zip
-- armv7 Android: https://github.com/stenzek/duckstation/releases/download/latest/duckstation_libretro_android_armv7.so.zip
-- AArch64 Linux: https://github.com/stenzek/duckstation/releases/download/latest/duckstation_libretro_linux_aarch64.so.zip
-- AArch64 Android: https://github.com/stenzek/duckstation/releases/download/latest/duckstation_libretro_android_aarch64.so.zip
-
-To use, download and extract, and install the core file in RetroArch or your preferred frontend.
-
-To build on Windows, use cmake using the following commands from a `x64 Native Tools Command Prompt for VS 2019`:
-- mkdir build
-- cd build
-- cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_LIBRETRO_CORE=ON ..
-
-You should then have a file named `duckstation_libretro.dll` which can be loaded as a core.
-
-To build on Linux, follow the same instructions as for a normal build, but for cmake use `cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_LIBRETRO_CORE=ON ..`. The shared library will be named `duckstation_libretro.so` in the current directory.
-
 ## Tests
  - Passes amidog's CPU and GTE tests in both interpreter and recompiler modes, partial passing of CPX tests
 

@@ -106,6 +106,7 @@ static std::tuple<TickCount, TickCount, TickCount> CalculateMemoryTiming(MEMDELA
 static void RecalculateMemoryTimings();
 
 static bool AllocateMemory();
+static void ReleaseMemory();
 
 static void SetCodePageFastmemProtection(u32 page_index, bool writable);
 
@@ -149,11 +150,7 @@ void Shutdown()
   CPU::g_state.fastmem_base = nullptr;
   m_fastmem_mode = CPUFastmemMode::Disabled;
 
-  if (g_ram)
-  {
-    m_memory_arena.ReleaseViewPtr(g_ram, RAM_SIZE);
-    g_ram = nullptr;
-  }
+  ReleaseMemory();
 }
 
 void Reset()
@@ -276,7 +273,19 @@ bool AllocateMemory()
     return false;
   }
 
+  Log_InfoPrintf("RAM is %u bytes at %p", RAM_SIZE, g_ram);
   return true;
+}
+
+void ReleaseMemory()
+{
+  if (g_ram)
+  {
+    m_memory_arena.ReleaseViewPtr(g_ram, RAM_SIZE);
+    g_ram = nullptr;
+  }
+
+  m_memory_arena.Destroy();
 }
 
 static ALWAYS_INLINE u32 FastmemAddressToLUTPageIndex(u32 address)
@@ -790,7 +799,7 @@ ALWAYS_INLINE static TickCount DoBIOSAccess(u32 offset, u32& value)
 }
 
 template<MemoryAccessType type, MemoryAccessSize size>
-ALWAYS_INLINE static TickCount DoEXP1Access(u32 offset, u32& value)
+static TickCount DoEXP1Access(u32 offset, u32& value)
 {
   if constexpr (type == MemoryAccessType::Read)
   {
@@ -842,7 +851,7 @@ ALWAYS_INLINE static TickCount DoEXP1Access(u32 offset, u32& value)
 }
 
 template<MemoryAccessType type, MemoryAccessSize size>
-ALWAYS_INLINE static TickCount DoEXP2Access(u32 offset, u32& value)
+static TickCount DoEXP2Access(u32 offset, u32& value)
 {
   if constexpr (type == MemoryAccessType::Read)
   {
@@ -866,7 +875,7 @@ ALWAYS_INLINE static TickCount DoEXP2Access(u32 offset, u32& value)
   }
   else
   {
-    if (offset == 0x23)
+    if (offset == 0x23 || offset == 0x80)
     {
       if (value == '\r')
       {
@@ -877,7 +886,7 @@ ALWAYS_INLINE static TickCount DoEXP2Access(u32 offset, u32& value)
         {
           Log_InfoPrintf("TTY: %s", m_tty_line_buffer.c_str());
 #ifdef _DEBUG
-          if (CPU::LOG_EXECUTION)
+          if (CPU::IsTraceEnabled())
             CPU::WriteToExecutionLog("TTY: %s\n", m_tty_line_buffer.c_str());
 #endif
         }

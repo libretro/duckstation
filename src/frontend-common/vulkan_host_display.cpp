@@ -9,13 +9,11 @@
 #include "common/vulkan/stream_buffer.h"
 #include "common/vulkan/swap_chain.h"
 #include "common/vulkan/util.h"
+#include "postprocessing_shadergen.h"
 #include <array>
 #ifdef WITH_IMGUI
 #include "imgui.h"
 #include "imgui_impl_vulkan.h"
-#endif
-#ifndef LIBRETRO
-#include "postprocessing_shadergen.h"
 #endif
 Log_SetChannel(VulkanHostDisplay);
 
@@ -192,6 +190,7 @@ bool VulkanHostDisplay::SetFullscreen(bool fullscreen, u32 width, u32 height, fl
 void VulkanHostDisplay::DestroyRenderSurface()
 {
   m_window_info = {};
+  g_vulkan_context->WaitForGPUIdle();
   m_swap_chain.reset();
 }
 
@@ -310,9 +309,10 @@ void VulkanHostDisplay::SetVSync(bool enabled)
   m_swap_chain->SetVSync(enabled);
 }
 
-bool VulkanHostDisplay::CreateRenderDevice(const WindowInfo& wi, std::string_view adapter_name, bool debug_device)
+bool VulkanHostDisplay::CreateRenderDevice(const WindowInfo& wi, std::string_view adapter_name, bool debug_device,
+                                           bool threaded_presentation)
 {
-  if (!Vulkan::Context::Create(adapter_name, &wi, &m_swap_chain, debug_device, false))
+  if (!Vulkan::Context::Create(adapter_name, &wi, &m_swap_chain, threaded_presentation, debug_device, false))
   {
     Log_ErrorPrintf("Failed to create Vulkan context");
     return false;
@@ -328,7 +328,8 @@ bool VulkanHostDisplay::CreateRenderDevice(const WindowInfo& wi, std::string_vie
   return true;
 }
 
-bool VulkanHostDisplay::InitializeRenderDevice(std::string_view shader_cache_directory, bool debug_device)
+bool VulkanHostDisplay::InitializeRenderDevice(std::string_view shader_cache_directory, bool debug_device,
+                                               bool threaded_presentation)
 {
   Vulkan::ShaderCache::Create(shader_cache_directory, debug_device);
 
@@ -422,8 +423,6 @@ void main()
   if (m_pipeline_layout == VK_NULL_HANDLE)
     return false;
 
-#ifndef LIBRETRO
-
   dslbuilder.AddBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
   m_post_process_descriptor_set_layout = dslbuilder.Create(device);
   if (m_post_process_descriptor_set_layout == VK_NULL_HANDLE)
@@ -447,8 +446,6 @@ void main()
   m_post_process_ubo_pipeline_layout = plbuilder.Create(device);
   if (m_post_process_ubo_pipeline_layout == VK_NULL_HANDLE)
     return false;
-
-#endif
 
   VkShaderModule vertex_shader = g_vulkan_shader_cache->GetVertexShader(fullscreen_quad_vertex_shader);
   if (vertex_shader == VK_NULL_HANDLE)
@@ -502,7 +499,6 @@ void main()
 
 void VulkanHostDisplay::DestroyResources()
 {
-#ifndef LIBRETRO
   Vulkan::Util::SafeDestroyPipelineLayout(m_post_process_pipeline_layout);
   Vulkan::Util::SafeDestroyPipelineLayout(m_post_process_ubo_pipeline_layout);
   Vulkan::Util::SafeDestroyDescriptorSetLayout(m_post_process_descriptor_set_layout);
@@ -512,7 +508,6 @@ void VulkanHostDisplay::DestroyResources()
   m_post_processing_stages.clear();
   m_post_processing_ubo.Destroy(true);
   m_post_processing_chain.ClearStages();
-#endif
 
   m_display_pixels_texture.Destroy(false);
   m_readback_staging_texture.Destroy(false);
@@ -648,7 +643,7 @@ bool VulkanHostDisplay::Render()
 
   g_vulkan_context->SubmitCommandBuffer(m_swap_chain->GetImageAvailableSemaphore(),
                                         m_swap_chain->GetRenderingFinishedSemaphore(), m_swap_chain->GetSwapChain(),
-                                        m_swap_chain->GetCurrentImageIndex());
+                                        m_swap_chain->GetCurrentImageIndex(), !m_swap_chain->IsVSyncEnabled());
   g_vulkan_context->MoveToNextCommandBuffer();
 
 #ifdef WITH_IMGUI
@@ -682,7 +677,6 @@ void VulkanHostDisplay::RenderDisplay()
 
   const auto [left, top, width, height] = CalculateDrawRect(GetWindowWidth(), GetWindowHeight(), m_display_top_margin);
 
-#ifndef LIBRETRO
   if (!m_post_processing_chain.IsEmpty())
   {
     ApplyPostProcessingChain(left, top, width, height, m_display_texture_handle, m_display_texture_width,
@@ -690,7 +684,6 @@ void VulkanHostDisplay::RenderDisplay()
                              m_display_texture_view_width, m_display_texture_view_height);
     return;
   }
-#endif
 
   BeginSwapChainRenderPass(m_swap_chain->GetCurrentFramebuffer());
   RenderDisplay(left, top, width, height, m_display_texture_handle, m_display_texture_width, m_display_texture_height,
@@ -719,10 +712,12 @@ void VulkanHostDisplay::RenderDisplay(s32 left, s32 top, s32 width, s32 height, 
     dsupdate.Update(g_vulkan_context->GetDevice());
   }
 
-  const PushConstants pc{static_cast<float>(texture_view_x) / static_cast<float>(texture_width),
-                         static_cast<float>(texture_view_y) / static_cast<float>(texture_height),
-                         (static_cast<float>(texture_view_width) - 0.5f) / static_cast<float>(texture_width),
-                         (static_cast<float>(texture_view_height) - 0.5f) / static_cast<float>(texture_height)};
+  const float position_adjust = m_display_linear_filtering ? 0.5f : 0.0f;
+  const float size_adjust = m_display_linear_filtering ? 1.0f : 0.0f;
+  const PushConstants pc{(static_cast<float>(texture_view_x) + position_adjust) / static_cast<float>(texture_width),
+                         (static_cast<float>(texture_view_y) + position_adjust) / static_cast<float>(texture_height),
+                         (static_cast<float>(texture_view_width) - size_adjust) / static_cast<float>(texture_width),
+                         (static_cast<float>(texture_view_height) - size_adjust) / static_cast<float>(texture_height)};
 
   vkCmdBindPipeline(cmdbuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_display_pipeline);
   vkCmdPushConstants(cmdbuffer, m_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
@@ -795,8 +790,6 @@ std::vector<std::string> VulkanHostDisplay::EnumerateAdapterNames()
 
   return {};
 }
-
-#ifndef LIBRETRO
 
 VulkanHostDisplay::PostProcessingStage::PostProcessingStage(PostProcessingStage&& move)
   : pipeline(move.pipeline), output_framebuffer(move.output_framebuffer),
@@ -1013,7 +1006,7 @@ void VulkanHostDisplay::ApplyPostProcessingChain(s32 final_left, s32 final_top, 
       Assert(pps.uniforms_size <= sizeof(buffer));
       m_post_processing_chain.GetShaderStage(i).FillUniformBuffer(
         buffer, texture_width, texture_height, texture_view_x, texture_view_y, texture_view_width, texture_view_height,
-        texture_width, texture_width, 0.0f);
+        GetWindowWidth(), GetWindowHeight(), 0.0f);
 
       vkCmdPushConstants(cmdbuffer, m_post_process_pipeline_layout,
                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pps.uniforms_size, buffer);
@@ -1055,14 +1048,5 @@ void VulkanHostDisplay::ApplyPostProcessingChain(s32 final_left, s32 final_top, 
     }
   }
 }
-
-#else // LIBRETRO
-
-bool VulkanHostDisplay::SetPostProcessingChain(const std::string_view& config)
-{
-  return false;
-}
-
-#endif
 
 } // namespace FrontendCommon

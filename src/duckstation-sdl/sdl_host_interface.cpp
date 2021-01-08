@@ -7,6 +7,7 @@
 #include "common/string_util.h"
 #include "core/cheats.h"
 #include "core/controller.h"
+#include "core/cpu_core.h"
 #include "core/gpu.h"
 #include "core/host_display.h"
 #include "core/system.h"
@@ -132,8 +133,10 @@ bool SDLHostInterface::CreateDisplay()
   }
 
   Assert(display);
-  if (!display->CreateRenderDevice(wi.value(), g_settings.gpu_adapter, g_settings.gpu_use_debug_device) ||
-      !display->InitializeRenderDevice(GetShaderCacheBasePath(), g_settings.gpu_use_debug_device))
+  if (!display->CreateRenderDevice(wi.value(), g_settings.gpu_adapter, g_settings.gpu_use_debug_device,
+                                   g_settings.gpu_threaded_presentation) ||
+      !display->InitializeRenderDevice(GetShaderCacheBasePath(), g_settings.gpu_use_debug_device,
+                                       g_settings.gpu_threaded_presentation))
   {
     ReportError("Failed to create/initialize display render device");
     return false;
@@ -670,7 +673,11 @@ void SDLHostInterface::DrawMainMenuBar()
 
     if (ImGui::MenuItem("Power Off", nullptr, false, system_enabled))
     {
-      RunLater([this]() { DestroySystem(); });
+      RunLater([this]() {
+        if (g_settings.save_state_on_exit)
+          SaveResumeSaveState();
+        PowerOffSystem();
+      });
       ClearImGuiFocus();
     }
 
@@ -1078,6 +1085,21 @@ void SDLHostInterface::DrawQuickSettingsMenu()
   settings_changed |= ImGui::MenuItem("Display Linear Filtering", nullptr, &m_settings_copy.display_linear_filtering);
   settings_changed |= ImGui::MenuItem("Display Integer Scaling", nullptr, &m_settings_copy.display_integer_scaling);
 
+  if (ImGui::BeginMenu("Aspect Ratio"))
+  {
+    for (u32 i = 0; i < static_cast<u32>(DisplayAspectRatio::Count); i++)
+    {
+      if (ImGui::MenuItem(Settings::GetDisplayAspectRatioName(static_cast<DisplayAspectRatio>(i)), nullptr,
+                          m_settings_copy.display_aspect_ratio == static_cast<DisplayAspectRatio>(i)))
+      {
+        m_settings_copy.display_aspect_ratio = static_cast<DisplayAspectRatio>(i);
+        settings_changed = true;
+      }
+    }
+
+    ImGui::EndMenu();
+  }
+
   if (ImGui::BeginMenu("Crop Mode"))
   {
     for (u32 i = 0; i < static_cast<u32>(DisplayCropMode::Count); i++)
@@ -1093,14 +1115,14 @@ void SDLHostInterface::DrawQuickSettingsMenu()
     ImGui::EndMenu();
   }
 
-  if (ImGui::BeginMenu("Aspect Ratio"))
+  if (ImGui::BeginMenu("Downsample Mode"))
   {
-    for (u32 i = 0; i < static_cast<u32>(DisplayAspectRatio::Count); i++)
+    for (u32 i = 0; i < static_cast<u32>(GPUDownsampleMode::Count); i++)
     {
-      if (ImGui::MenuItem(Settings::GetDisplayAspectRatioName(static_cast<DisplayAspectRatio>(i)), nullptr,
-                          m_settings_copy.display_aspect_ratio == static_cast<DisplayAspectRatio>(i)))
+      if (ImGui::MenuItem(Settings::GetDownsampleModeDisplayName(static_cast<GPUDownsampleMode>(i)), nullptr,
+                          m_settings_copy.gpu_downsample_mode == static_cast<GPUDownsampleMode>(i)))
       {
-        m_settings_copy.display_aspect_ratio = static_cast<DisplayAspectRatio>(i);
+        m_settings_copy.gpu_downsample_mode = static_cast<GPUDownsampleMode>(i);
         settings_changed = true;
       }
     }
@@ -1154,8 +1176,17 @@ void SDLHostInterface::DrawDebugMenu()
 
   ImGui::Separator();
 
+  settings_changed |= ImGui::MenuItem("Disable All Enhancements", nullptr, &m_settings_copy.disable_all_enhancements);
   settings_changed |= ImGui::MenuItem("Dump CPU to VRAM Copies", nullptr, &debug_settings.dump_cpu_to_vram_copies);
   settings_changed |= ImGui::MenuItem("Dump VRAM to CPU Copies", nullptr, &debug_settings.dump_vram_to_cpu_copies);
+
+  if (ImGui::MenuItem("CPU Trace Logging", nullptr, CPU::IsTraceEnabled()))
+  {
+    if (!CPU::IsTraceEnabled())
+      CPU::StartTrace();
+    else
+      CPU::StopTrace();
+  }
 
   if (ImGui::MenuItem("Dump RAM...", nullptr, nullptr, system_valid))
     DoDumpRAM();
@@ -1535,6 +1566,21 @@ void SDLHostInterface::DrawSettingsWindow()
               nullptr, static_cast<int>(DisplayCropMode::Count)))
         {
           m_settings_copy.display_crop_mode = static_cast<DisplayCropMode>(display_crop_mode);
+          settings_changed = true;
+        }
+
+        ImGui::Text("Downsample Mode:");
+        ImGui::SameLine(indent);
+        int gpu_downsample_mode = static_cast<int>(m_settings_copy.gpu_downsample_mode);
+        if (ImGui::Combo(
+              "##gpu_downsample_mode", &gpu_downsample_mode,
+              [](void*, int index, const char** out_text) {
+                *out_text = Settings::GetDownsampleModeDisplayName(static_cast<GPUDownsampleMode>(index));
+                return true;
+              },
+              nullptr, static_cast<int>(GPUDownsampleMode::Count)))
+        {
+          m_settings_copy.gpu_downsample_mode = static_cast<GPUDownsampleMode>(gpu_downsample_mode);
           settings_changed = true;
         }
 
