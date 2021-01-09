@@ -67,6 +67,7 @@ std::vector<std::pair<QString, QString>> QtHostInterface::getAvailableLanguageLi
           {QStringLiteral("日本語"), QStringLiteral("ja")},
           {QStringLiteral("Italiano"), QStringLiteral("it")},
           {QStringLiteral("Nederlands"), QStringLiteral("nl")},
+          {QStringLiteral("Polski"), QStringLiteral("pl")},
           {QStringLiteral("Português (Pt)"), QStringLiteral("pt-pt")},
           {QStringLiteral("Português (Br)"), QStringLiteral("pt-br")},
           {QStringLiteral("Русский"), QStringLiteral("ru")},
@@ -359,7 +360,11 @@ void QtHostInterface::bootSystem(std::shared_ptr<const SystemBootParameters> par
   }
 
   emit emulationStarting();
-  BootSystem(*params);
+  if (!BootSystem(*params))
+    return;
+
+  // force a frame to be drawn to repaint the window
+  renderDisplay();
 }
 
 void QtHostInterface::resumeSystemFromState(const QString& filename, bool boot_on_failure)
@@ -488,9 +493,7 @@ bool QtHostInterface::AcquireHostDisplay()
 
   m_is_rendering_to_main = m_settings_interface->GetBoolValue("Main", "RenderToMainWindow", true);
 
-  QtDisplayWidget* display_widget =
-    createDisplayRequested(m_worker_thread, QString::fromStdString(g_settings.gpu_adapter),
-                           g_settings.gpu_use_debug_device, m_is_fullscreen, m_is_rendering_to_main);
+  QtDisplayWidget* display_widget = createDisplayRequested(m_worker_thread, m_is_fullscreen, m_is_rendering_to_main);
   if (!display_widget || !m_display->HasRenderDevice())
   {
     emit destroyDisplayRequested();
@@ -501,7 +504,8 @@ bool QtHostInterface::AcquireHostDisplay()
   createImGuiContext(display_widget->devicePixelRatioFromScreen());
 
   if (!m_display->MakeRenderContextCurrent() ||
-      !m_display->InitializeRenderDevice(GetShaderCacheBasePath(), g_settings.gpu_use_debug_device) ||
+      !m_display->InitializeRenderDevice(GetShaderCacheBasePath(), g_settings.gpu_use_debug_device,
+                                         g_settings.gpu_threaded_presentation) ||
       !CreateHostDisplayResources())
   {
     destroyImGuiContext();
@@ -574,6 +578,7 @@ void QtHostInterface::updateDisplayState()
   if (!System::IsShutdown())
   {
     g_gpu->UpdateResolutionScale();
+    UpdateSoftwareCursor();
     redrawDisplayWindow();
   }
   UpdateSpeedLimiterState();
@@ -613,6 +618,11 @@ bool QtHostInterface::RequestRenderWindowSize(s32 new_window_width, s32 new_wind
 
   emit displaySizeRequested(new_window_width, new_window_height);
   return true;
+}
+
+void* QtHostInterface::GetTopLevelWindowHandle() const
+{
+  return reinterpret_cast<void*>(m_main_window->winId());
 }
 
 void QtHostInterface::PollAndUpdate()
@@ -709,7 +719,6 @@ void QtHostInterface::OnSystemStateSaved(bool global, s32 slot)
 void QtHostInterface::LoadSettings()
 {
   m_settings_interface = std::make_unique<INISettingsInterface>(CommonHostInterface::GetSettingsFileName());
-  Log::SetConsoleOutputParams(true);
 
   if (!CommonHostInterface::CheckSettings(*m_settings_interface.get()))
   {
@@ -731,6 +740,11 @@ void QtHostInterface::SetDefaultSettings(SettingsInterface& si)
 void QtHostInterface::UpdateInputMap()
 {
   updateInputMap();
+}
+
+void QtHostInterface::SetMouseMode(bool relative, bool hide_cursor)
+{
+  emit mouseModeRequested(relative, hide_cursor);
 }
 
 void QtHostInterface::updateInputMap()
@@ -790,6 +804,20 @@ void QtHostInterface::powerOffSystem()
   if (!isOnWorkerThread())
   {
     QMetaObject::invokeMethod(this, "powerOffSystem", Qt::QueuedConnection);
+    return;
+  }
+
+  if (g_settings.save_state_on_exit)
+    SaveResumeSaveState();
+
+  PowerOffSystem();
+}
+
+void QtHostInterface::powerOffSystemWithoutSaving()
+{
+  if (!isOnWorkerThread())
+  {
+    QMetaObject::invokeMethod(this, "powerOffSystemWithoutSaving", Qt::QueuedConnection);
     return;
   }
 
@@ -1426,12 +1454,6 @@ static bool AddImGuiFont(const std::string& language, float size, float framebuf
   {
     path = GetFontPath("msgothic.ttc");
     range = ImGui::GetIO().Fonts->GetGlyphRangesJapanese();
-  }
-  else if (language == "ru")
-  {
-    path = GetFontPath("segoeui.ttf");
-    range = ImGui::GetIO().Fonts->GetGlyphRangesCyrillic();
-    size *= 1.15f;
   }
   else if (language == "zh-cn")
   {

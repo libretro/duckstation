@@ -31,7 +31,7 @@ bool LibretroD3D11HostDisplay::RequestHardwareRendererContext(retro_hw_render_ca
 }
 
 bool LibretroD3D11HostDisplay::CreateRenderDevice(const WindowInfo& wi, std::string_view adapter_name,
-                                                  bool debug_device)
+                                                  bool debug_device, bool threaded_presentation)
 {
   retro_hw_render_interface* ri = nullptr;
   if (!g_retro_environment_callback(RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE, &ri))
@@ -139,6 +139,6 @@ bool LibretroD3D11HostDisplay::CheckFramebufferSize(u32 width, u32 height)
   if (m_framebuffer.GetWidth() == width && m_framebuffer.GetHeight() == height)
     return true;
 
-  return m_framebuffer.Create(m_device.Get(), width, height, 1, DXGI_FORMAT_R8G8B8A8_UNORM,
+  return m_framebuffer.Create(m_device.Get(), width, height, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM,
                               D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET);
 }

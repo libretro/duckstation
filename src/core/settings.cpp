@@ -120,6 +120,7 @@ void Settings::Load(SettingsInterface& si)
   load_devices_from_save_states = si.GetBoolValue("Main", "LoadDevicesFromSaveStates", false);
   apply_game_settings = si.GetBoolValue("Main", "ApplyGameSettings", true);
   auto_load_cheats = si.GetBoolValue("Main", "AutoLoadCheats", false);
+  disable_all_enhancements = si.GetBoolValue("Main", "DisableAllEnhancements", false);
 
   cpu_execution_mode =
     ParseCPUExecutionMode(
@@ -143,12 +144,17 @@ void Settings::Load(SettingsInterface& si)
   gpu_use_debug_device = si.GetBoolValue("GPU", "UseDebugDevice", false);
   gpu_per_sample_shading = si.GetBoolValue("GPU", "PerSampleShading", false);
   gpu_use_thread = si.GetBoolValue("GPU", "UseThread", true);
+  gpu_threaded_presentation = si.GetBoolValue("GPU", "ThreadedPresentation", true);
   gpu_true_color = si.GetBoolValue("GPU", "TrueColor", true);
   gpu_scaled_dithering = si.GetBoolValue("GPU", "ScaledDithering", false);
   gpu_texture_filter =
     ParseTextureFilterName(
       si.GetStringValue("GPU", "TextureFilter", GetTextureFilterName(DEFAULT_GPU_TEXTURE_FILTER)).c_str())
       .value_or(DEFAULT_GPU_TEXTURE_FILTER);
+  gpu_downsample_mode =
+    ParseDownsampleModeName(
+      si.GetStringValue("GPU", "DownsampleMode", GetDownsampleModeName(DEFAULT_GPU_DOWNSAMPLE_MODE)).c_str())
+      .value_or(DEFAULT_GPU_DOWNSAMPLE_MODE);
   gpu_disable_interlacing = si.GetBoolValue("GPU", "DisableInterlacing", false);
   gpu_force_ntsc_timings = si.GetBoolValue("GPU", "ForceNTSCTimings", false);
   gpu_widescreen_hack = si.GetBoolValue("GPU", "WidescreenHack", false);
@@ -283,6 +289,7 @@ void Settings::Save(SettingsInterface& si) const
   si.SetBoolValue("Main", "LoadDevicesFromSaveStates", load_devices_from_save_states);
   si.SetBoolValue("Main", "ApplyGameSettings", apply_game_settings);
   si.SetBoolValue("Main", "AutoLoadCheats", auto_load_cheats);
+  si.SetBoolValue("Main", "DisableAllEnhancements", disable_all_enhancements);
 
   si.SetStringValue("CPU", "ExecutionMode", GetCPUExecutionModeName(cpu_execution_mode));
   si.SetBoolValue("CPU", "OverclockEnable", cpu_overclock_enable);
@@ -299,9 +306,11 @@ void Settings::Save(SettingsInterface& si) const
   si.SetBoolValue("GPU", "UseDebugDevice", gpu_use_debug_device);
   si.SetBoolValue("GPU", "PerSampleShading", gpu_per_sample_shading);
   si.SetBoolValue("GPU", "UseThread", gpu_use_thread);
+  si.SetBoolValue("GPU", "ThreadedPresentation", gpu_threaded_presentation);
   si.SetBoolValue("GPU", "TrueColor", gpu_true_color);
   si.SetBoolValue("GPU", "ScaledDithering", gpu_scaled_dithering);
   si.SetStringValue("GPU", "TextureFilter", GetTextureFilterName(gpu_texture_filter));
+  si.SetStringValue("GPU", "DownsampleMode", GetDownsampleModeName(gpu_downsample_mode));
   si.SetBoolValue("GPU", "DisableInterlacing", gpu_disable_interlacing);
   si.SetBoolValue("GPU", "ForceNTSCTimings", gpu_force_ntsc_timings);
   si.SetBoolValue("GPU", "WidescreenHack", gpu_widescreen_hack);
@@ -624,6 +633,35 @@ const char* Settings::GetTextureFilterDisplayName(GPUTextureFilter filter)
   return s_texture_filter_display_names[static_cast<int>(filter)];
 }
 
+static constexpr auto s_downsample_mode_names = make_array("Disabled", "Box", "Adaptive");
+static constexpr auto s_downsample_mode_display_names = make_array(
+  TRANSLATABLE("GPUDownsampleMode", "Disabled"), TRANSLATABLE("GPUDownsampleMode", "Box (Downsample 3D/Smooth All)"),
+  TRANSLATABLE("GPUDownsampleMode", "Adaptive (Preserve 3D/Smooth 2D)"));
+
+std::optional<GPUDownsampleMode> Settings::ParseDownsampleModeName(const char* str)
+{
+  int index = 0;
+  for (const char* name : s_downsample_mode_names)
+  {
+    if (StringUtil::Strcasecmp(name, str) == 0)
+      return static_cast<GPUDownsampleMode>(index);
+
+    index++;
+  }
+
+  return std::nullopt;
+}
+
+const char* Settings::GetDownsampleModeName(GPUDownsampleMode mode)
+{
+  return s_downsample_mode_names[static_cast<int>(mode)];
+}
+
+const char* Settings::GetDownsampleModeDisplayName(GPUDownsampleMode mode)
+{
+  return s_downsample_mode_display_names[static_cast<int>(mode)];
+}
+
 static std::array<const char*, 3> s_display_crop_mode_names = {{"None", "Overscan", "Borders"}};
 static std::array<const char*, 3> s_display_crop_mode_display_names = {
   {TRANSLATABLE("DisplayCropMode", "None"), TRANSLATABLE("DisplayCropMode", "Only Overscan Area"),
@@ -653,9 +691,9 @@ const char* Settings::GetDisplayCropModeDisplayName(DisplayCropMode crop_mode)
   return s_display_crop_mode_display_names[static_cast<int>(crop_mode)];
 }
 
-static std::array<const char*, 13> s_display_aspect_ratio_names = {{"Auto (Game Native)", "4:3", "16:9", "16:10",
-                                                                    "19:9", "21:9", "32:9", "8:7", "5:4", "3:2",
-                                                                    "2:1 (VRAM 1:1)", "1:1", "PAR 1:1"}};
+static std::array<const char*, 13> s_display_aspect_ratio_names = {
+  {TRANSLATABLE("DisplayAspectRatio", "Auto (Game Native)"), "4:3", "16:9", "16:10", "19:9", "21:9", "32:9", "8:7",
+   "5:4", "3:2", "2:1 (VRAM 1:1)", "1:1", "PAR 1:1"}};
 static constexpr std::array<float, 13> s_display_aspect_ratio_values = {
   {-1.0f, 4.0f / 3.0f, 16.0f / 9.0f, 16.0f / 10.0f, 19.0f / 9.0f, 64.0f / 27.0f, 32.0f / 9.0f, 8.0f / 7.0f, 5.0f / 4.0f,
    3.0f / 2.0f, 2.0f / 1.0f, 1.0f, -1.0f}};

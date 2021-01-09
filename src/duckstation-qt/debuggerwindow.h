@@ -24,11 +24,13 @@ public:
 Q_SIGNALS:
   void closed();
 
+public Q_SLOTS:
+  void onEmulationPaused(bool paused);
+
 protected:
   void closeEvent(QCloseEvent* event);
 
 private Q_SLOTS:
-  void onEmulationPaused(bool paused);
   void onDebuggerMessageReported(const QString& message);
 
   void refreshAll();
@@ -41,6 +43,7 @@ private Q_SLOTS:
   void onGoToAddressTriggered();
   void onDumpAddressTriggered();
   void onFollowAddressTriggered();
+  void onTraceTriggered();  
   void onAddBreakpointTriggered();
   void onToggleBreakpointTriggered();
   void onClearBreakpointsTriggered();
@@ -50,6 +53,7 @@ private Q_SLOTS:
   void onCodeViewItemActivated(QModelIndex index);
   void onMemorySearchTriggered();
   void onMemorySearchStringChanged(const QString&);
+
 
 private:
   void setupAdditionalUi();

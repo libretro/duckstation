@@ -147,6 +147,11 @@ static bool IsHexCharacter(char c)
   return (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f') || (c >= '0' && c <= '9');
 }
 
+static int SignedCharToInt(char ch)
+{
+  return static_cast<int>(static_cast<unsigned char>(ch));
+}
+
 static const std::string* FindKey(const KeyValuePairVector& kvp, const char* search)
 {
   for (const auto& it : kvp)
@@ -180,7 +185,7 @@ bool CheatList::LoadFromPCSXRString(const std::string& str)
   while (std::getline(iss, line))
   {
     char* start = line.data();
-    while (*start != '\0' && std::isspace(*start))
+    while (*start != '\0' && std::isspace(SignedCharToInt(*start)))
       start++;
 
     // skip empty lines
@@ -188,7 +193,7 @@ bool CheatList::LoadFromPCSXRString(const std::string& str)
       continue;
 
     char* end = start + std::strlen(start) - 1;
-    while (end > start && std::isspace(*end))
+    while (end > start && std::isspace(SignedCharToInt(*end)))
     {
       *end = '\0';
       end--;
@@ -299,7 +304,7 @@ bool CheatList::LoadFromLibretroString(const std::string& str)
   while (std::getline(iss, line))
   {
     char* start = line.data();
-    while (*start != '\0' && std::isspace(*start))
+    while (*start != '\0' && std::isspace(SignedCharToInt(*start)))
       start++;
 
     // skip empty lines
@@ -307,7 +312,7 @@ bool CheatList::LoadFromLibretroString(const std::string& str)
       continue;
 
     char* end = start + std::strlen(start) - 1;
-    while (end > start && std::isspace(*end))
+    while (end > start && std::isspace(SignedCharToInt(*end)))
     {
       *end = '\0';
       end--;
@@ -322,21 +327,21 @@ bool CheatList::LoadFromLibretroString(const std::string& str)
     *equals = '\0';
 
     char* key_end = equals - 1;
-    while (key_end > start && std::isspace(*key_end))
+    while (key_end > start && std::isspace(SignedCharToInt(*key_end)))
     {
       *key_end = '\0';
       key_end--;
     }
 
     char* value_start = equals + 1;
-    while (*value_start != '\0' && std::isspace(*value_start))
+    while (*value_start != '\0' && std::isspace(SignedCharToInt(*value_start)))
       value_start++;
 
     if (*value_start == '\0')
       continue;
 
     char* value_end = value_start + std::strlen(value_start) - 1;
-    while (value_end > value_start && std::isspace(*value_end))
+    while (value_end > value_start && std::isspace(SignedCharToInt(*value_end)))
     {
       *value_end = '\0';
       value_end--;
@@ -382,6 +387,93 @@ bool CheatList::LoadFromLibretroString(const std::string& str)
   }
 
   Log_InfoPrintf("Loaded %zu cheats (libretro format)", m_codes.size());
+  return !m_codes.empty();
+}
+
+bool CheatList::LoadFromEPSXeString(const std::string& str)
+{
+  std::istringstream iss(str);
+
+  std::string line;
+  std::string group;
+  CheatCode::Type type = CheatCode::Type::Gameshark;
+  CheatCode::Activation activation = CheatCode::Activation::EndFrame;
+  CheatCode current_code;
+  while (std::getline(iss, line))
+  {
+    char* start = line.data();
+    while (*start != '\0' && std::isspace(SignedCharToInt(*start)))
+      start++;
+
+    // skip empty lines
+    if (*start == '\0')
+      continue;
+
+    char* end = start + std::strlen(start) - 1;
+    while (end > start && std::isspace(SignedCharToInt(*end)))
+    {
+      *end = '\0';
+      end--;
+    }
+
+    // skip comments and empty line
+    if (*start == ';' || *start == '\0')
+      continue;
+
+    if (*start == '#')
+    {
+      start++;
+
+      // new cheat
+      if (current_code.Valid())
+        m_codes.push_back(std::move(current_code));
+
+      current_code = CheatCode();
+      if (group.empty())
+        group = "Ungrouped";
+
+      current_code.group = std::move(group);
+      group = std::string();
+      current_code.type = type;
+      type = CheatCode::Type::Gameshark;
+      current_code.activation = activation;
+      activation = CheatCode::Activation::EndFrame;
+
+      char* separator = std::strchr(start, '\\');
+      if (separator)
+      {
+        *separator = 0;
+        current_code.group = start;
+        start = separator + 1;
+      }
+
+      current_code.description.append(start);
+      continue;
+    }
+
+    while (!IsHexCharacter(*start) && start != end)
+      start++;
+    if (start == end)
+      continue;
+
+    char* end_ptr;
+    CheatCode::Instruction inst;
+    inst.first = static_cast<u32>(std::strtoul(start, &end_ptr, 16));
+    inst.second = 0;
+    if (end_ptr)
+    {
+      while (!IsHexCharacter(*end_ptr) && end_ptr != end)
+        end_ptr++;
+      if (end_ptr != end)
+        inst.second = static_cast<u32>(std::strtoul(end_ptr, nullptr, 16));
+    }
+    current_code.instructions.push_back(inst);
+  }
+
+  if (current_code.Valid())
+    m_codes.push_back(std::move(current_code));
+
+  Log_InfoPrintf("Loaded %zu cheats (EPSXe format)", m_codes.size());
   return !m_codes.empty();
 }
 
@@ -480,24 +572,34 @@ CheatList::Format CheatList::DetectFileFormat(const std::string& str)
   while (std::getline(iss, line))
   {
     char* start = line.data();
-    while (*start != '\0' && std::isspace(*start))
+    while (*start != '\0' && std::isspace(SignedCharToInt(*start)))
       start++;
 
     // skip empty lines
-    if (*start == '\0' || *start == '=')
+    if (*start == '\0')
       continue;
 
     char* end = start + std::strlen(start) - 1;
-    while (end > start && std::isspace(*end))
+    while (end > start && std::isspace(SignedCharToInt(*end)))
     {
       *end = '\0';
       end--;
     }
 
+    // eat comments
+    if (start[0] == '#' || start[0] == ';')
+      continue;
+
     if (std::strncmp(line.data(), "cheats", 6) == 0)
       return Format::Libretro;
-    else
+
+    // pcsxr if we see brackets
+    if (start[0] == '[')
       return Format::PCSXR;
+
+    // otherwise if it's a code, it's probably epsxe
+    if (std::isdigit(start[0]))
+      return Format::EPSXe;
   }
 
   return Format::Count;
@@ -521,6 +623,8 @@ bool CheatList::LoadFromString(const std::string& str, Format format)
     return LoadFromPCSXRString(str);
   else if (format == Format::Libretro)
     return LoadFromLibretroString(str);
+  else if (format == Format::EPSXe)
+    return LoadFromEPSXeString(str);
 
   Log_ErrorPrintf("Invalid or unknown cheat format");
   return false;
@@ -566,7 +670,7 @@ bool CheatList::LoadFromPackage(const std::string& game_code)
   while (std::getline(iss, line))
   {
     char* start = line.data();
-    while (*start != '\0' && std::isspace(*start))
+    while (*start != '\0' && std::isspace(SignedCharToInt(*start)))
       start++;
 
     // skip empty lines
@@ -574,7 +678,7 @@ bool CheatList::LoadFromPackage(const std::string& game_code)
       continue;
 
     char* end = start + std::strlen(start) - 1;
-    while (end > start && std::isspace(*end))
+    while (end > start && std::isspace(SignedCharToInt(*end)))
     {
       *end = '\0';
       end--;
@@ -591,7 +695,7 @@ bool CheatList::LoadFromPackage(const std::string& game_code)
     while (std::getline(iss, line))
     {
       start = line.data();
-      while (*start != '\0' && std::isspace(*start))
+      while (*start != '\0' && std::isspace(SignedCharToInt(*start)))
         start++;
 
       // skip empty lines
@@ -599,7 +703,7 @@ bool CheatList::LoadFromPackage(const std::string& game_code)
         continue;
 
       end = start + std::strlen(start) - 1;
-      while (end > start && std::isspace(*end))
+      while (end > start && std::isspace(SignedCharToInt(*end)))
       {
         *end = '\0';
         end--;
@@ -774,7 +878,7 @@ bool CheatCode::SetInstructionsFromString(const std::string& str)
   for (std::string line; std::getline(ss, line);)
   {
     char* start = line.data();
-    while (*start != '\0' && std::isspace(*start))
+    while (*start != '\0' && std::isspace(SignedCharToInt(*start)))
       start++;
 
     // skip empty lines
@@ -782,7 +886,7 @@ bool CheatCode::SetInstructionsFromString(const std::string& str)
       continue;
 
     char* end = start + std::strlen(start) - 1;
-    while (end > start && std::isspace(*end))
+    while (end > start && std::isspace(SignedCharToInt(*end)))
     {
       *end = '\0';
       end--;
@@ -1109,6 +1213,98 @@ void CheatCode::Apply() const
         index += 2;
       }
       break;
+      
+      case InstructionCode::ExtFindAndReplace:
+      {
+          
+        if ((index + 4) >= instructions.size())
+        {
+          Log_ErrorPrintf("Incomplete find/replace instruction");
+          return;
+        }
+        const Instruction& inst2 = instructions[index + 1];
+        const Instruction& inst3 = instructions[index + 2];
+        const Instruction& inst4 = instructions[index + 3];
+        const Instruction& inst5 = instructions[index + 4];   
+        
+        const u32 offset = Truncate16(inst.value32 & 0x0000FFFFu) << 1;
+        const u8 wildcard = Truncate8((inst.value32 & 0x00FF0000u) >> 16);
+        const u32 minaddress = inst.address - offset;
+        const u32 maxaddress = inst.address + offset;
+        const u8 f1  = Truncate8((inst2.first & 0xFF000000u) >> 24);
+        const u8 f2  = Truncate8((inst2.first & 0x00FF0000u) >> 16);
+        const u8 f3  = Truncate8((inst2.first & 0x0000FF00u) >> 8);
+        const u8 f4  = Truncate8 (inst2.first & 0x000000FFu);
+        const u8 f5  = Truncate8((inst2.value32 & 0xFF000000u) >> 24);
+        const u8 f6  = Truncate8((inst2.value32 & 0x00FF0000u) >> 16);
+        const u8 f7  = Truncate8((inst2.value32 & 0x0000FF00u) >> 8);
+        const u8 f8  = Truncate8 (inst2.value32 & 0x000000FFu);
+        const u8 f9  = Truncate8((inst3.first & 0xFF000000u) >> 24);
+        const u8 f10 = Truncate8((inst3.first & 0x00FF0000u) >> 16);
+        const u8 f11 = Truncate8((inst3.first & 0x0000FF00u) >> 8);
+        const u8 f12 = Truncate8 (inst3.first & 0x000000FFu);
+        const u8 f13 = Truncate8((inst3.value32 & 0xFF000000u) >> 24);
+        const u8 f14 = Truncate8((inst3.value32 & 0x00FF0000u) >> 16);
+        const u8 f15 = Truncate8((inst3.value32 & 0x0000FF00u) >> 8);
+        const u8 f16 = Truncate8 (inst3.value32 & 0x000000FFu);
+        const u8 r1  = Truncate8((inst4.first & 0xFF000000u) >> 24);
+        const u8 r2  = Truncate8((inst4.first & 0x00FF0000u) >> 16);
+        const u8 r3  = Truncate8((inst4.first & 0x0000FF00u) >> 8);
+        const u8 r4  = Truncate8 (inst4.first & 0x000000FFu);
+        const u8 r5  = Truncate8((inst4.value32 & 0xFF000000u) >> 24);
+        const u8 r6  = Truncate8((inst4.value32 & 0x00FF0000u) >> 16);
+        const u8 r7  = Truncate8((inst4.value32 & 0x0000FF00u) >> 8);
+        const u8 r8  = Truncate8 (inst4.value32 & 0x000000FFu);
+        const u8 r9  = Truncate8((inst5.first & 0xFF000000u) >> 24);
+        const u8 r10 = Truncate8((inst5.first & 0x00FF0000u) >> 16);
+        const u8 r11 = Truncate8((inst5.first & 0x0000FF00u) >> 8);
+        const u8 r12 = Truncate8 (inst5.first & 0x000000FFu);
+        const u8 r13 = Truncate8((inst5.value32 & 0xFF000000u) >> 24);
+        const u8 r14 = Truncate8((inst5.value32 & 0x00FF0000u) >> 16);
+        const u8 r15 = Truncate8((inst5.value32 & 0x0000FF00u) >> 8);
+        const u8 r16 = Truncate8 (inst5.value32 & 0x000000FFu);        
+        
+        for (u32 address = minaddress;address<=maxaddress;address+=2)
+        {
+          if ((DoMemoryRead<u8>(address   )==f1 || f1  == wildcard) &&
+              (DoMemoryRead<u8>(address+1 )==f2 || f2  == wildcard) &&
+              (DoMemoryRead<u8>(address+2 )==f3 || f3  == wildcard) &&
+              (DoMemoryRead<u8>(address+3 )==f4 || f4  == wildcard) &&
+              (DoMemoryRead<u8>(address+4 )==f5 || f5  == wildcard) &&
+              (DoMemoryRead<u8>(address+5 )==f6 || f6  == wildcard) &&
+              (DoMemoryRead<u8>(address+6 )==f7 || f7  == wildcard) &&
+              (DoMemoryRead<u8>(address+7 )==f8 || f8  == wildcard) &&
+              (DoMemoryRead<u8>(address+8 )==f9 || f9  == wildcard) &&
+              (DoMemoryRead<u8>(address+9 )==f10|| f10 == wildcard) &&
+              (DoMemoryRead<u8>(address+10)==f11|| f11 == wildcard) &&
+              (DoMemoryRead<u8>(address+11)==f12|| f12 == wildcard) &&
+              (DoMemoryRead<u8>(address+12)==f13|| f13 == wildcard) &&
+              (DoMemoryRead<u8>(address+13)==f14|| f14 == wildcard) &&
+              (DoMemoryRead<u8>(address+14)==f15|| f15 == wildcard) &&
+              (DoMemoryRead<u8>(address+15)==f16|| f16 == wildcard))           
+          {
+            if (r1  != wildcard) DoMemoryWrite<u8>(address   , r1 );
+            if (r2  != wildcard) DoMemoryWrite<u8>(address+1 , r2 );
+            if (r3  != wildcard) DoMemoryWrite<u8>(address+2 , r3 );
+            if (r4  != wildcard) DoMemoryWrite<u8>(address+3 , r4 );
+            if (r5  != wildcard) DoMemoryWrite<u8>(address+4 , r5 );
+            if (r6  != wildcard) DoMemoryWrite<u8>(address+5 , r6 );  
+            if (r7  != wildcard) DoMemoryWrite<u8>(address+6 , r7 );  
+            if (r8  != wildcard) DoMemoryWrite<u8>(address+7 , r8 );  
+            if (r9  != wildcard) DoMemoryWrite<u8>(address+8 , r9 );  
+            if (r10 != wildcard) DoMemoryWrite<u8>(address+9 , r10);  
+            if (r11 != wildcard) DoMemoryWrite<u8>(address+10, r11);  
+            if (r12 != wildcard) DoMemoryWrite<u8>(address+11, r12);  
+            if (r13 != wildcard) DoMemoryWrite<u8>(address+12, r13);  
+            if (r14 != wildcard) DoMemoryWrite<u8>(address+13, r14);  
+            if (r15 != wildcard) DoMemoryWrite<u8>(address+14, r15);  
+            if (r16 != wildcard) DoMemoryWrite<u8>(address+15, r16);
+            address=address+15; 
+          }            
+        }
+        index += 5;
+      }
+      break;
 
       case InstructionCode::CompareEqual16:
       {
@@ -1375,7 +1571,9 @@ void CheatCode::ApplyOnDisable() const
       case InstructionCode::MemoryCopy:
         index += 2;
         break;
-
+      case InstructionCode::ExtFindAndReplace:  
+      index += 5;
+        break;
       // for conditionals, we don't want to skip over in case it changed at some point
       case InstructionCode::ExtCompareEqual32:
       case InstructionCode::ExtCompareNotEqual32:

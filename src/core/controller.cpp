@@ -35,6 +35,11 @@ u32 Controller::GetButtonStateBits() const
   return 0;
 }
 
+std::optional<u32> Controller::GetAnalogInputBytes() const
+{
+  return std::nullopt;
+}
+
 u32 Controller::GetVibrationMotorCount() const
 {
   return 0;
@@ -47,7 +52,7 @@ float Controller::GetVibrationMotorStrength(u32 motor)
 
 void Controller::LoadSettings(const char* section) {}
 
-bool Controller::GetSoftwareCursor(const Common::RGBA8Image** image, float* image_scale)
+bool Controller::GetSoftwareCursor(const Common::RGBA8Image** image, float* image_scale, bool* relative_mode)
 {
   return false;
 }
@@ -248,6 +253,9 @@ Controller::SettingList Controller::GetSettings(ControllerType type)
 
     case ControllerType::NeGcon:
       return NeGcon::StaticGetSettings();
+
+    case ControllerType::PlayStationMouse:
+      return PlayStationMouse::StaticGetSettings();
 
     default:
       return {};

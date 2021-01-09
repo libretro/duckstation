@@ -174,9 +174,6 @@ void CommonHostInterface::PowerOffSystem()
   if (System::IsShutdown())
     return;
 
-  if (g_settings.save_state_on_exit)
-    SaveResumeSaveState();
-
   HostInterface::PowerOffSystem();
 
   if (InBatchMode())
@@ -225,6 +222,8 @@ static void PrintCommandLineHelp(const char* progname, const char* frontend_name
   std::fprintf(stderr, "  -nocontroller: Prevents the emulator from polling for controllers.\n"
                        "                 Try this option if you're having difficulties starting\n"
                        "                 the emulator.\n");
+  std::fprintf(stderr, "  -settings <filename>: Loads a custom settings configuration from the\n"
+                       "    specified filename. Default settings applied if file not found.\n");
   std::fprintf(stderr, "  --: Signals that no more arguments will follow and the remaining\n"
                        "    parameters make up the filename. Use when the filename contains\n"
                        "    spaces or starts with a dash.\n");
@@ -321,6 +320,11 @@ bool CommonHostInterface::ParseCommandLineParameters(int argc, char* argv[],
       else if (CHECK_ARG_PARAM("-resume"))
       {
         state_index = -1;
+        continue;
+      }
+      else if (CHECK_ARG_PARAM("-settings"))
+      {
+        m_settings_filename = argv[++i];
         continue;
       }
       else if (CHECK_ARG("--"))
@@ -1048,16 +1052,10 @@ void CommonHostInterface::UpdateControllerRumble()
     if (!controller)
       continue;
 
-    bool changed = false;
     for (u32 i = 0; i < rumble.num_motors; i++)
-    {
-      const float strength = controller->GetVibrationMotorStrength(i);
-      changed |= (strength != rumble.last_strength[i]);
-      rumble.last_strength[i] = strength;
-    }
+      rumble.last_strength[i] = controller->GetVibrationMotorStrength(i);
 
-    if (changed)
-      rumble.update_callback(rumble.last_strength.data(), rumble.num_motors);
+    rumble.update_callback(rumble.last_strength.data(), rumble.num_motors);
   }
 }
 
@@ -1065,15 +1063,10 @@ void CommonHostInterface::StopControllerRumble()
 {
   for (ControllerRumbleState& rumble : m_controller_vibration_motors)
   {
-    bool changed = false;
     for (u32 i = 0; i < rumble.num_motors; i++)
-    {
-      changed |= (rumble.last_strength[i] != 0.0f);
       rumble.last_strength[i] = 0.0f;
-    }
 
-    if (changed)
-      rumble.update_callback(rumble.last_strength.data(), rumble.num_motors);
+    rumble.update_callback(rumble.last_strength.data(), rumble.num_motors);
   }
 }
 
@@ -1452,7 +1445,7 @@ void CommonHostInterface::RegisterGeneralHotkeys()
                                    2.0f);
                    }
                  });
-
+#ifndef ANDROID
   RegisterHotkey(StaticString(TRANSLATABLE("Hotkeys", "General")), StaticString("ToggleFullscreen"),
                  StaticString(TRANSLATABLE("Hotkeys", "Toggle Fullscreen")), [this](bool pressed) {
                    if (pressed)
@@ -1493,9 +1486,19 @@ void CommonHostInterface::RegisterGeneralHotkeys()
                        }
                      }
 
+                     if (g_settings.save_state_on_exit)
+                       SaveResumeSaveState();
+
                      PowerOffSystem();
                    }
                  });
+#else
+  RegisterHotkey(StaticString(TRANSLATABLE("Hotkeys", "General")), StaticString("TogglePatchCodes"),
+                 StaticString(TRANSLATABLE("Hotkeys", "Toggle Patch Codes")), [this](bool pressed) {
+              if (pressed)
+                DoToggleCheats();
+          });
+#endif
 
   RegisterHotkey(StaticString(TRANSLATABLE("Hotkeys", "General")), StaticString("Reset"),
                  StaticString(TRANSLATABLE("Hotkeys", "Reset System")), [this](bool pressed) {
@@ -1949,6 +1952,17 @@ bool CommonHostInterface::SaveInputProfile(const char* profile_path, SettingsInt
 
 std::string CommonHostInterface::GetSettingsFileName() const
 {
+  if (!m_settings_filename.empty())
+  {
+    if (!FileSystem::FileExists(m_settings_filename.c_str()))
+    {
+      Log_ErrorPrintf("Could not find settings file %s, using default", m_settings_filename.c_str());
+    }
+    else
+    {
+      return GetUserDirectoryRelativePath(m_settings_filename.c_str());
+    }
+  }
   return GetUserDirectoryRelativePath("settings.ini");
 }
 
@@ -2670,6 +2684,11 @@ bool CommonHostInterface::RequestRenderWindowScale(float scale)
     std::max<u32>(static_cast<u32>(std::ceil(static_cast<float>(m_display->GetDisplayHeight()) * y_scale * scale)), 1);
 
   return RequestRenderWindowSize(static_cast<s32>(requested_width), static_cast<s32>(requested_height));
+}
+
+void* CommonHostInterface::GetTopLevelWindowHandle() const
+{
+  return nullptr;
 }
 
 std::unique_ptr<ByteStream> CommonHostInterface::OpenPackageFile(const char* path, u32 flags)

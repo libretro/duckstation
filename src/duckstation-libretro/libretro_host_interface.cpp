@@ -489,7 +489,7 @@ void LibretroHostInterface::OnSystemDestroyed()
   m_using_hardware_renderer = false;
 }
 
-static std::array<retro_core_option_definition, 51> s_option_definitions = {{
+static std::array<retro_core_option_definition, 52> s_option_definitions = {{
   {"duckstation_Console.Region",
    "Console Region",
    "Determines which region/hardware to emulate. Auto-Detect will use the region of the disc inserted.",
@@ -701,12 +701,6 @@ static std::array<retro_core_option_definition, 51> s_option_definitions = {{
    "Very slow, and incompatible with the recompiler.",
    {{"true", "Enabled"}, {"false", "Disabled"}},
    "false"},
-  {"duckstation_Display.CropMode",
-   "Crop Mode",
-   "Changes how much of the image is cropped. Some games display garbage in the overscan area which is typically "
-   "hidden.",
-   {{"None", "None"}, {"Overscan", "Only Overscan Area"}, {"Borders", "All Borders"}},
-   "Overscan"},
   {"duckstation_Display.AspectRatio",
    "Aspect Ratio",
    "Sets the core-provided aspect ratio.",
@@ -724,6 +718,20 @@ static std::array<retro_core_option_definition, 51> s_option_definitions = {{
     {"1:1", "1:1"},
     {"PAR 1:1", "PAR 1:1"}},
    "Auto"},
+  {"duckstation_Display.CropMode",
+   "Crop Mode",
+   "Changes how much of the image is cropped. Some games display garbage in the overscan area which is typically "
+   "hidden.",
+   {{"None", "None"}, {"Overscan", "Only Overscan Area"}, {"Borders", "All Borders"}},
+   "Overscan"},
+  {"duckstation_GPU.DownsampleMode",
+   "Downsampling",
+   "Downsamples the rendered image prior to displaying it. Can improve overall image quality in mixed 2D/3D games, but "
+   "should be disabled for pure 3D games. Only applies to the hardware renderers.",
+   {{"Disabled", "Disabled"},
+    {"Box", "Box (Downsample 3D/Smooth All)"},
+    {"Adaptive", "Adaptive (Preserve 3D/Smooth 2D)"}},
+   "Disabled"},
   {"duckstation_Main.LoadDevicesFromSaveStates",
    "Load Devices From Save States",
    "Sets whether the contents of devices and memory cards will be loaded when a save state is loaded.",
@@ -756,10 +764,7 @@ static std::array<retro_core_option_definition, 51> s_option_definitions = {{
    "Sets the type of controller for Slot 1.",
    {{"None", "None"},
     {"DigitalController", "Digital Controller"},
-    {"AnalogController", "Analog Controller (DualShock)"},
-    {"NamcoGunCon", "Namco GunCon"},
-    {"PlayStationMouse", "PlayStation Mouse"},
-    {"NeGcon", "NeGcon"}},
+    {"AnalogController", "Analog Controller (DualShock)"}},
    "DigitalController"},
   {"duckstation_Controller1.ForceAnalogOnReset",
    "Controller 1 Force Analog Mode on Reset",
@@ -782,10 +787,7 @@ static std::array<retro_core_option_definition, 51> s_option_definitions = {{
    "Sets the type of controller for Slot 2.",
    {{"None", "None"},
     {"DigitalController", "Digital Controller"},
-    {"AnalogController", "Analog Controller (DualShock)"},
-    {"NamcoGunCon", "Namco GunCon"},
-    {"PlayStationMouse", "PlayStation Mouse"},
-    {"NeGcon", "NeGcon"}},
+    {"AnalogController", "Analog Controller (DualShock)"}},
    "None"},
   {"duckstation_Controller2.ForceAnalogOnReset",
    "Controller 2 Force Analog Mode on Reset",
@@ -1303,8 +1305,8 @@ void LibretroHostInterface::SwitchToHardwareRenderer()
         Log_ErrorPrintf("Unhandled renderer '%s'", Settings::GetRendererName(renderer.value()));
         return;
     }
-    if (!display || !display->CreateRenderDevice(wi, {}, g_settings.gpu_use_debug_device) ||
-        !display->InitializeRenderDevice(GetShaderCacheBasePath(), g_settings.gpu_use_debug_device))
+    if (!display || !display->CreateRenderDevice(wi, {}, g_settings.gpu_use_debug_device, false) ||
+        !display->InitializeRenderDevice(GetShaderCacheBasePath(), g_settings.gpu_use_debug_device, false))
     {
       Log_ErrorPrintf("Failed to create hardware host display");
       return;

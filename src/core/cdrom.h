@@ -27,6 +27,8 @@ public:
 
   bool HasMedia() const { return m_reader.HasMedia(); }
   const std::string& GetMediaFileName() const { return m_reader.GetMediaFileName(); }
+  bool IsMediaPS1Disc() const;
+  bool DoesMediaRegionMatchConsole() const;
 
   void InsertMedia(std::unique_ptr<CDImage> media);
   std::unique_ptr<CDImage> RemoveMedia(bool force = false);
@@ -252,7 +254,7 @@ private:
   void UpdateCommandEvent();
   void ExecuteDrive(TickCount ticks_late);
   void BeginReading(TickCount ticks_late = 0, bool after_seek = false);
-  void BeginPlaying(u8 track_bcd, TickCount ticks_late = 0, bool after_seek = false);
+  void BeginPlaying(u8 track, TickCount ticks_late = 0, bool after_seek = false);
   void DoShellOpenComplete(TickCount ticks_late);
   void DoResetComplete(TickCount ticks_late);
   void DoSeekComplete(TickCount ticks_late);

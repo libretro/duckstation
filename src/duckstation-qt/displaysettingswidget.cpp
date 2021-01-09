@@ -28,12 +28,17 @@ DisplaySettingsWidget::DisplaySettingsWidget(QtHostInterface* host_interface, QW
   SettingWidgetBinder::BindWidgetToEnumSetting(m_host_interface, m_ui.displayCropMode, "Display", "CropMode",
                                                &Settings::ParseDisplayCropMode, &Settings::GetDisplayCropModeName,
                                                Settings::DEFAULT_DISPLAY_CROP_MODE);
+  SettingWidgetBinder::BindWidgetToEnumSetting(m_host_interface, m_ui.gpuDownsampleMode, "GPU", "DownsampleMode",
+                                               &Settings::ParseDownsampleModeName, &Settings::GetDownsampleModeName,
+                                               Settings::DEFAULT_GPU_DOWNSAMPLE_MODE);
   SettingWidgetBinder::BindWidgetToBoolSetting(m_host_interface, m_ui.displayLinearFiltering, "Display",
                                                "LinearFiltering");
   SettingWidgetBinder::BindWidgetToBoolSetting(m_host_interface, m_ui.displayIntegerScaling, "Display",
                                                "IntegerScaling");
   SettingWidgetBinder::BindWidgetToBoolSetting(m_host_interface, m_ui.vsync, "Display", "VSync");
   SettingWidgetBinder::BindWidgetToBoolSetting(m_host_interface, m_ui.gpuThread, "GPU", "UseThread", true);
+  SettingWidgetBinder::BindWidgetToBoolSetting(m_host_interface, m_ui.threadedPresentation, "GPU",
+                                               "ThreadedPresentation", true);
   SettingWidgetBinder::BindWidgetToBoolSetting(m_host_interface, m_ui.showOSDMessages, "Display", "ShowOSDMessages",
                                                true);
   SettingWidgetBinder::BindWidgetToBoolSetting(m_host_interface, m_ui.showFPS, "Display", "ShowFPS", false);
@@ -62,15 +67,21 @@ DisplaySettingsWidget::DisplaySettingsWidget(QtHostInterface* host_interface, QW
        "renderers. <br>This option is only supported in Direct3D and Vulkan. OpenGL will always use the default "
        "device."));
   dialog->registerWidgetHelp(
-    m_ui.displayAspectRatio, tr("Aspect Ratio"), QStringLiteral("Auto (Game Native)"),
+    m_ui.displayAspectRatio, tr("Aspect Ratio"),
+    qApp->translate("DisplayAspectRatio", Settings::GetDisplayAspectRatioName(Settings::DEFAULT_DISPLAY_ASPECT_RATIO)),
     tr("Changes the aspect ratio used to display the console's output to the screen. The default is Auto (Game Native) "
        "which automatically adjusts the aspect ratio to match how a game would be shown on a typical TV of the era."));
   dialog->registerWidgetHelp(
-    m_ui.displayCropMode, tr("Crop Mode"), tr("Only Overscan Area"),
+    m_ui.displayCropMode, tr("Crop Mode"),
+    qApp->translate("DisplayCropMode", Settings::GetDisplayCropModeDisplayName(Settings::DEFAULT_DISPLAY_CROP_MODE)),
     tr("Determines how much of the area typically not visible on a consumer TV set to crop/hide. <br>"
        "Some games display content in the overscan area, or use it for screen effects. <br>May "
        "not display correctly with the \"All Borders\" setting. \"Only Overscan\" offers a good "
        "compromise between stability and hiding black borders."));
+  dialog->registerWidgetHelp(
+    m_ui.gpuDownsampleMode, tr("Downsampling"), tr("Disabled"),
+    tr("Downsamples the rendered image prior to displaying it. Can improve overall image quality in mixed 2D/3D games, "
+       "but should be disabled for pure 3D games. Only applies to the hardware renderers."));
   dialog->registerWidgetHelp(m_ui.displayLinearFiltering, tr("Linear Upscaling"), tr("Checked"),
                              tr("Uses bilinear texture filtering when displaying the console's framebuffer to the "
                                 "screen. <br>Disabling filtering "
@@ -85,6 +96,9 @@ DisplaySettingsWidget::DisplaySettingsWidget(QtHostInterface* host_interface, QW
     m_ui.vsync, tr("VSync"), tr("Checked"),
     tr("Enable this option to match DuckStation's refresh rate with your current monitor or screen. "
        "VSync is automatically disabled when it is not possible (e.g. running at non-100% speed)."));
+  dialog->registerWidgetHelp(m_ui.threadedPresentation, tr("Threaded Presentation"), tr("Checked"),
+                             tr("Presents frames on a background thread when fast forwarding or vsync is disabled. "
+                                "This can measurably improve performance in the Vulkan renderer."));
   dialog->registerWidgetHelp(m_ui.gpuThread, tr("Threaded Rendering"), tr("Checked"),
                              tr("Uses a second thread for drawing graphics. Currently only available for the software "
                                 "renderer, but can provide a significant speed improvement, and is safe to use."));
@@ -104,7 +118,7 @@ DisplaySettingsWidget::DisplaySettingsWidget(QtHostInterface* host_interface, QW
   {
     QCheckBox* cb = new QCheckBox(tr("Use Blit Swap Chain"), m_ui.basicGroupBox);
     SettingWidgetBinder::BindWidgetToBoolSetting(m_host_interface, cb, "Display", "UseBlitSwapChain", false);
-    m_ui.basicCheckboxGridLayout->addWidget(cb, 1, 0, 1, 1);
+    m_ui.basicCheckboxGridLayout->addWidget(cb, 1, 1, 1, 1);
     dialog->registerWidgetHelp(cb, tr("Use Blit Swap Chain"), tr("Unchecked"),
                                tr("Uses a blit presentation model instead of flipping when using the Direct3D 11 "
                                   "renderer. This usually results in slower performance, but may be required for some "
@@ -126,13 +140,19 @@ void DisplaySettingsWidget::setupAdditionalUi()
   for (u32 i = 0; i < static_cast<u32>(DisplayAspectRatio::Count); i++)
   {
     m_ui.displayAspectRatio->addItem(
-      QString::fromUtf8(Settings::GetDisplayAspectRatioName(static_cast<DisplayAspectRatio>(i))));
+      qApp->translate("DisplayAspectRatio", Settings::GetDisplayAspectRatioName(static_cast<DisplayAspectRatio>(i))));
   }
 
   for (u32 i = 0; i < static_cast<u32>(DisplayCropMode::Count); i++)
   {
     m_ui.displayCropMode->addItem(
       qApp->translate("DisplayCropMode", Settings::GetDisplayCropModeDisplayName(static_cast<DisplayCropMode>(i))));
+  }
+
+  for (u32 i = 0; i < static_cast<u32>(GPUDownsampleMode::Count); i++)
+  {
+    m_ui.gpuDownsampleMode->addItem(
+      qApp->translate("GPUDownsampleMode", Settings::GetDownsampleModeDisplayName(static_cast<GPUDownsampleMode>(i))));
   }
 }
 
@@ -141,6 +161,7 @@ void DisplaySettingsWidget::populateGPUAdaptersAndResolutions()
   std::vector<std::string> adapter_names;
   std::vector<std::string> fullscreen_modes;
   bool thread_supported = false;
+  bool threaded_presentation_supported = false;
   switch (static_cast<GPURenderer>(m_ui.renderer->currentIndex()))
   {
 #ifdef WIN32
@@ -155,6 +176,7 @@ void DisplaySettingsWidget::populateGPUAdaptersAndResolutions()
 
     case GPURenderer::HardwareVulkan:
       adapter_names = FrontendCommon::VulkanHostDisplay::EnumerateAdapterNames();
+      threaded_presentation_supported = true;
       break;
 
     case GPURenderer::Software:
@@ -207,6 +229,7 @@ void DisplaySettingsWidget::populateGPUAdaptersAndResolutions()
   }
 
   m_ui.gpuThread->setEnabled(thread_supported);
+  m_ui.threadedPresentation->setEnabled(threaded_presentation_supported);
 }
 
 void DisplaySettingsWidget::onGPUAdapterIndexChanged()

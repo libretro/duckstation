@@ -43,7 +43,7 @@ public:
     MAX_FIFO_SIZE = 4096,
     DOT_TIMER_INDEX = 0,
     HBLANK_TIMER_INDEX = 1,
-    MAX_RESOLUTION_SCALE = 16,
+    MAX_RESOLUTION_SCALE = 32,
   };
 
   enum : u16
@@ -167,7 +167,7 @@ protected:
   // The GPU internally appears to run at 2x the system clock.
   ALWAYS_INLINE static constexpr TickCount GPUTicksToSystemTicks(TickCount gpu_ticks)
   {
-    return std::max<TickCount>(gpu_ticks >> 1, 1);
+    return std::max<TickCount>((gpu_ticks + 1) >> 1, 1);
   }
   ALWAYS_INLINE static constexpr TickCount SystemTicksToGPUTicks(TickCount sysclk_ticks) { return sysclk_ticks << 1; }
 

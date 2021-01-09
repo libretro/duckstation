@@ -56,6 +56,7 @@ struct Entry
   std::optional<u32> cdrom_read_speedup;
   std::optional<DisplayCropMode> display_crop_mode;
   std::optional<DisplayAspectRatio> display_aspect_ratio;
+  std::optional<GPUDownsampleMode> gpu_downsample_mode;
   std::optional<bool> display_linear_upscaling;
   std::optional<bool> display_integer_upscaling;
   std::optional<bool> display_force_4_3_for_24bit;
@@ -86,6 +87,10 @@ struct Entry
   bool SaveToStream(ByteStream* stream) const;
 
   void ApplySettings(bool display_osd_messages) const;
+
+  // Key-based interface, used by Android.
+  std::optional<std::string> GetValueForKey(const std::string_view& key) const;
+  void SetValueForKey(const std::string_view& key, const std::optional<std::string>& value);
 };
 
 #ifndef LIBRETRO

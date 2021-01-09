@@ -560,6 +560,12 @@ bool Boot(const SystemBootParameters& params)
       return false;
     }
 
+    if (g_settings.start_paused || params.override_start_paused.value_or(false))
+    {
+      DebugAssert(s_state == State::Running);
+      s_state = State::Paused;
+    }
+
     return true;
   }
 
@@ -699,7 +705,7 @@ bool Boot(const SystemBootParameters& params)
   }
 
   // Good to go.
-  s_state = State::Running;
+  s_state = (g_settings.start_paused || params.override_start_paused.value_or(false)) ? State::Paused : State::Running;
   return true;
 }
 
@@ -1255,7 +1261,7 @@ void ResetThrottler()
 void Throttle()
 {
   // Reset the throttler on audio buffer overflow, so we don't end up out of phase.
-  if (g_host_interface->GetAudioStream()->DidUnderflow())
+  if (g_host_interface->GetAudioStream()->DidUnderflow() && s_target_speed >= 1.0f)
   {
     Log_DevPrintf("Audio buffer underflowed, resetting throttler");
     ResetThrottler();

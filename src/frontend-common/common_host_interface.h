@@ -86,7 +86,7 @@ public:
   virtual void DestroySystem() override;
 
   /// Returns the game list.
-  ALWAYS_INLINE const GameList* GetGameList() const { return m_game_list.get(); }
+  ALWAYS_INLINE GameList* GetGameList() const { return m_game_list.get(); }
 
   /// Returns a list of all available hotkeys.
   ALWAYS_INLINE const HotkeyInfoList& GetHotkeyInfoList() const { return m_hotkeys; }
@@ -191,6 +191,9 @@ public:
 
   /// Requests a resize to a multiple of the render window size.
   bool RequestRenderWindowScale(float scale);
+
+  /// Returns a pointer to the top-level window, needed by some controller interfaces.
+  virtual void* GetTopLevelWindowHandle() const;
 
   /// Opens a file in the DuckStation "package".
   /// This is the APK for Android builds, or the program directory for standalone builds.
@@ -332,6 +335,8 @@ protected:
   void DrawDebugWindows();
   void DoFrameStep();
   void DoToggleCheats();
+
+  std::string m_settings_filename;
 
   std::unique_ptr<GameList> m_game_list;
 

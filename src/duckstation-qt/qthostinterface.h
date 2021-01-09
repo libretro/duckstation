@@ -72,6 +72,7 @@ public:
   std::string TranslateStdString(const char* context, const char* str) const override;
 
   bool RequestRenderWindowSize(s32 new_window_width, s32 new_window_height) override;
+  void* GetTopLevelWindowHandle() const override;
 
   ALWAYS_INLINE const GameList* getGameList() const { return m_game_list.get(); }
   ALWAYS_INLINE GameList* getGameList() { return m_game_list.get(); }
@@ -129,8 +130,7 @@ Q_SIGNALS:
   void emulationPaused(bool paused);
   void stateSaved(const QString& game_code, bool global, qint32 slot);
   void gameListRefreshed();
-  QtDisplayWidget* createDisplayRequested(QThread* worker_thread, const QString& adapter_name, bool use_debug_device,
-                                          bool fullscreen, bool render_to_main);
+  QtDisplayWidget* createDisplayRequested(QThread* worker_thread, bool fullscreen, bool render_to_main);
   QtDisplayWidget* updateDisplayRequested(QThread* worker_thread, bool fullscreen, bool render_to_main);
   void displaySizeRequested(qint32 width, qint32 height);
   void focusDisplayWidgetRequested();
@@ -140,6 +140,7 @@ Q_SIGNALS:
   void runningGameChanged(const QString& filename, const QString& game_code, const QString& game_title);
   void exitRequested();
   void inputProfileLoaded();
+  void mouseModeRequested(bool relative, bool hide_cursor);
 
 public Q_SLOTS:
   void setDefaultSettings();
@@ -153,6 +154,7 @@ public Q_SLOTS:
   void resumeSystemFromState(const QString& filename, bool boot_on_failure);
   void resumeSystemFromMostRecentState();
   void powerOffSystem();
+  void powerOffSystemWithoutSaving();
   void synchronousPowerOffSystem();
   void resetSystem();
   void pauseSystem(bool paused, bool wait_until_paused = false);
@@ -203,6 +205,8 @@ protected:
   void LoadSettings() override;
   void SetDefaultSettings(SettingsInterface& si) override;
   void UpdateInputMap() override;
+
+  void SetMouseMode(bool relative, bool hide_cursor) override;
 
 private:
   enum : u32
