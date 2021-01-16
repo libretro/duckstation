@@ -9,6 +9,7 @@
   variables:
     CORENAME: duckstation
     CORE_ARGS: -DBUILD_LIBRETRO_CORE=ON -DCMAKE_BUILD_TYPE=Release
+    API_LEVEL: 24
 
 # Inclusion templates, required for the build to work
 include:
