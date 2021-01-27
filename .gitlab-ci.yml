@@ -14,6 +14,10 @@
 # Inclusion templates, required for the build to work
 include:
   ################################## DESKTOPS ################################
+  # Windows
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/windows-cmake-msvc19.yml'
+
   # Linux
   - project: 'libretro-infrastructure/ci-templates'
     file: '/linux-cmake.yml'
@@ -33,6 +37,12 @@ stages:
 ##############################################################################
 #
 ################################### DESKTOPS #################################
+# Windows 64-bit
+libretro-build-windows-x64:
+  extends:
+    - .libretro-windows-msvc19-cmake-x86_64
+    - .core-defs
+
 # Linux 64-bit
 libretro-build-linux-x64:
   extends:
