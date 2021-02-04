@@ -43,6 +43,12 @@ libretro-build-windows-x64:
     - .libretro-windows-msvc19-cmake-x86_64
     - .core-defs
 
+# Windows 32-bit
+libretro-build-windows-i686:
+  extends:
+    - .libretro-windows-msvc19-cmake-x86
+    - .core-defs
+
 # Linux 64-bit
 libretro-build-linux-x64:
   extends:
