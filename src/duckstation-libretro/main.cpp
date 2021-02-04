@@ -28,11 +28,11 @@ RETRO_API void retro_get_system_info(struct retro_system_info* info)
   std::memset(info, 0, sizeof(*info));
 
 #if defined(_DEBUGFAST)
-  info->library_name = "DuckStation DebugFast";
+  info->library_name = "SwanStation DebugFast";
 #elif defined(_DEBUG)
-  info->library_name = "DuckStation Debug";
+  info->library_name = "SwanStation Debug";
 #else
-  info->library_name = "DuckStation";
+  info->library_name = "SwanStation";
 #endif
 
   info->library_version = g_scm_tag_str;
