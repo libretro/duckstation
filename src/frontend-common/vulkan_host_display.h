@@ -102,9 +102,11 @@ protected:
   virtual bool CreateResources() override;
   virtual void DestroyResources() override;
 
+#ifndef LIBRETRO
   virtual bool CreateImGuiContext() override;
   virtual void DestroyImGuiContext() override;
   virtual bool UpdateImGuiFontTexture() override;
+#endif
 
   void BeginSwapChainRenderPass(VkFramebuffer framebuffer, u32 width, u32 height);
   void RenderDisplay();

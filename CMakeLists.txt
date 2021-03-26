@@ -24,11 +24,16 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14.0" CACHE STRING "")
 if(NOT ANDROID)
   option(BUILD_NOGUI_FRONTEND "Build the NoGUI frontend" ON)
   option(BUILD_QT_FRONTEND "Build the Qt frontend" ON)
+  option(BUILD_LIBRETRO_CORE "Build a libretro core" OFF)
   option(ENABLE_DISCORD_PRESENCE "Build with Discord Rich Presence support" ON)
   option(ENABLE_CHEEVOS "Build with RetroAchievements support" ON)
   option(USE_SDL2 "Link with SDL2 for controller support" ON)
 endif()
 
+if(BUILD_LIBRETRO_CORE)
+else()
+  option(USE_CRASHHANDLER "Crash Handler support" ON)
+endif()
 
 # OpenGL context creation methods.
 if(SUPPORTS_X11)
@@ -51,7 +56,8 @@ if(USE_WAYLAND)
   set(USE_EGL ON)
 endif()
 
-if(ANDROID)
+# When we're building for libretro, everything else is invalid because of PIC.
+if(ANDROID OR BUILD_LIBRETRO_CORE)
   if(BUILD_NOGUI_FRONTEND)
     message(WARNING "Building for Android, disabling NoGUI frontend")
     set(BUILD_NOGUI_FRONTEND OFF)
@@ -76,7 +82,14 @@ if(ANDROID)
   endif()
 
   # Cheevos are always on.
-  set(ENABLE_CHEEVOS ON)
+  if(NOT BUILD_LIBRETRO_CORE)
+    set(ENABLE_CHEEVOS ON)
+  endif()
+
+  # Force PIC when compiling a libretro core.
+  if(BUILD_LIBRETRO_CORE)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+  endif()
 endif()
 
 
@@ -205,7 +218,12 @@ endif()
 
 # Detect processor type.
 if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64" OR ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "amd64")
-  set(CPU_ARCH "x64")
+  # Fix case where CMAKE_SYSTEM_PROCESSOR is x86_64 in a 32bit userspace
+  if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(CPU_ARCH "x64")
+  else()
+    set(CPU_ARCH "x86")
+  endif()
 elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "AMD64")
   # MSVC x86/x64
   if(CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -218,7 +236,7 @@ elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86" OR ${CMAKE_SYSTEM_PROCESSOR} STR
   set(CPU_ARCH "x86")
 elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "aarch64")
   set(CPU_ARCH "aarch64")
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "arm" OR ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "armv7-a" OR ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "armv7l")
+elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "arm" OR ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "armv7-a" OR ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "armv7l" OR ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "armv8l")
   set(CPU_ARCH "aarch32")
   if(ANDROID)
     # Force ARM mode, since apparently ANDROID_ARM_MODE isn't working..
@@ -235,7 +253,7 @@ endif()
 
 
 # Write binaries to a seperate directory.
-if(WIN32)
+if(WIN32 AND NOT BUILD_LIBRETRO_CORE)
   # For Windows, use the source directory, except for libretro.
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin/${CPU_ARCH}")
 else()
@@ -263,6 +281,6 @@ enable_testing()
 add_subdirectory(dep)
 add_subdirectory(src)
 
-if(ANDROID)
+if(ANDROID AND NOT BUILD_LIBRETRO_CORE)
   add_subdirectory(android/app/src/cpp)
 endif()

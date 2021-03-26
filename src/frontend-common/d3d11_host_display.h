@@ -81,16 +81,20 @@ protected:
   virtual bool CreateResources() override;
   virtual void DestroyResources() override;
 
+#ifndef LIBRETRO
   virtual bool CreateImGuiContext() override;
   virtual void DestroyImGuiContext() override;
   virtual bool UpdateImGuiFontTexture() override;
+#endif
 
   bool CreateSwapChain(const DXGI_MODE_DESC* fullscreen_mode);
   bool CreateSwapChainRTV();
 
   void RenderDisplay();
   void RenderSoftwareCursor();
+#ifndef LIBRETRO
   void RenderImGui();
+#endif
 
   void RenderDisplay(s32 left, s32 top, s32 width, s32 height, void* texture_handle, u32 texture_width,
                      s32 texture_height, s32 texture_view_x, s32 texture_view_y, s32 texture_view_width,

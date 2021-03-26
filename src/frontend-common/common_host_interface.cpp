@@ -75,8 +75,10 @@ bool CommonHostInterface::Initialize()
   if (!FileSystem::SetWorkingDirectory(m_user_directory.c_str()))
     Log_ErrorPrintf("Failed to set working directory to '%s'", m_user_directory.c_str());
 
+#ifdef HAVE_CRASHHANDLER
   // Set crash handler to dump to user directory, because of permissions.
   CrashHandler::SetWriteDirectory(m_user_directory);
+#endif
 
   LoadSettings();
   UpdateLogSettings(g_settings.log_level, g_settings.log_filter.empty() ? nullptr : g_settings.log_filter.c_str(),
@@ -3375,11 +3377,6 @@ bool CommonHostInterface::ParseFullscreenMode(const std::string_view& mode, u32*
   *height = 0;
   *refresh_rate = 0;
   return false;
-}
-
-std::string CommonHostInterface::GetFullscreenModeString(u32 width, u32 height, float refresh_rate)
-{
-  return StringUtil::StdStringFromFormat("%u x %u @ %f hz", width, height, refresh_rate);
 }
 
 bool CommonHostInterface::RequestRenderWindowSize(s32 new_window_width, s32 new_window_height)

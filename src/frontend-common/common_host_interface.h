@@ -1,6 +1,7 @@
 #pragma once
 #include "common/bitfield.h"
 #include "common/string.h"
+#include "common/string_util.h"
 #include "core/controller.h"
 #include "core/host_interface.h"
 #include <atomic>
@@ -273,7 +274,10 @@ public:
   static bool ParseFullscreenMode(const std::string_view& mode, u32* width, u32* height, float* refresh_rate);
 
   /// Converts a fullscreen mode to a string.
-  static std::string GetFullscreenModeString(u32 width, u32 height, float refresh_rate);
+  static std::string GetFullscreenModeString(u32 width, u32 height, float refresh_rate)
+  {
+     return StringUtil::StdStringFromFormat("%u x %u @ %f hz", width, height, refresh_rate);
+  }
 
   /// Returns true if the state should be saved on shutdown.
   bool ShouldSaveResumeState() const;
