@@ -78,7 +78,9 @@ if(ANDROID OR BUILD_LIBRETRO_CORE)
   endif()
 
   # Cheevos are always on.
-  set(ENABLE_CHEEVOS ON)
+  if(NOT BUILD_LIBRETRO_CORE)
+    set(ENABLE_CHEEVOS ON)
+  endif()
 
   # Force PIC when compiling a libretro core.
   if(BUILD_LIBRETRO_CORE)
