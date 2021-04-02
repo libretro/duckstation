@@ -211,7 +211,12 @@ endif()
 
 # Detect processor type.
 if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64" OR ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "amd64")
-  set(CPU_ARCH "x64")
+  # Fix case where CMAKE_SYSTEM_PROCESSOR is x86_64 in a 32bit userspace
+  if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(CPU_ARCH "x64")
+  else()
+    set(CPU_ARCH "x86")
+  endif()
 elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "AMD64")
   # MSVC x86/x64
   if(CMAKE_SIZEOF_VOID_P EQUAL 8)
