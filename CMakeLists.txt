@@ -30,8 +30,7 @@ if(NOT ANDROID)
   option(USE_SDL2 "Link with SDL2 for controller support" ON)
 endif()
 
-if(BUILD_LIBRETRO_CORE)
-else()
+if(NOT BUILD_LIBRETRO_CORE)
   option(USE_CRASHHANDLER "Crash Handler support" ON)
 endif()
 
@@ -79,6 +78,11 @@ if(ANDROID OR BUILD_LIBRETRO_CORE)
   endif()
   if(USE_WAYLAND)
     set(USE_WAYLAND OFF)
+  endif()
+  if(BUILD_LIBRETRO_CORE)
+    set(USE_EGL OFF)
+    set(USE_EVDEV OFF)
+    set(ENABLE_CHEEVOS OFF)
   endif()
 
   # Cheevos are always on.
