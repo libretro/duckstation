@@ -23,7 +23,13 @@ if(WIN32)
   )
 endif()
 
-target_link_libraries(duckstation_libretro PRIVATE core common glad scmversion frontend-common vulkan-loader libretro-common)
+if (MSVC)
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /DELAYLOAD:OpenGL32.dll")
+  target_link_libraries(duckstation_libretro PRIVATE core common glad scmversion frontend-common vulkan-loader libretro-common Delayimp.lib)
+else()
+  target_link_libraries(duckstation_libretro PRIVATE core common glad scmversion frontend-common vulkan-loader libretro-common)
+endif()
+
 
 # no lib prefix
 set_target_properties(duckstation_libretro PROPERTIES PREFIX "")
