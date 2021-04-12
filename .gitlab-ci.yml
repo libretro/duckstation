@@ -8,7 +8,7 @@
 .core-defs:
   variables:
     CORENAME: duckstation
-    CORE_ARGS: duckstation-libretro -DCMAKE_BUILD_TYPE=Release -DENABLE_CHEEVOS=OFF
+    CORE_ARGS: -S duckstation-libretro -B . -DCMAKE_BUILD_TYPE=Release
     API_LEVEL: 24
 
 # Inclusion templates, required for the build to work
