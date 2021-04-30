@@ -95,8 +95,8 @@ private:
   static unsigned RETRO_CALLCONV DiskControlGetImageIndex();
   static bool RETRO_CALLCONV DiskControlSetImageIndex(unsigned index);
   static unsigned RETRO_CALLCONV DiskControlGetNumImages();
-  static bool RETRO_CALLCONV DiskControlReplaceImageIndex(unsigned index, const retro_game_info* info);
-  static bool RETRO_CALLCONV DiskControlAddImageIndex();
+  // static bool RETRO_CALLCONV DiskControlReplaceImageIndex(unsigned index, const retro_game_info* info);
+  // static bool RETRO_CALLCONV DiskControlAddImageIndex();
   static bool RETRO_CALLCONV DiskControlSetInitialImage(unsigned index, const char* path);
   static bool RETRO_CALLCONV DiskControlGetImagePath(unsigned index, char* path, size_t len);
   static bool RETRO_CALLCONV DiskControlGetImageLabel(unsigned index, char* label, size_t len);

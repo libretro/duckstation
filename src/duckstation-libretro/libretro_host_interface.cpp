@@ -1396,7 +1396,7 @@ bool LibretroHostInterface::DiskControlSetEjectState(bool ejected)
   {
     const u32 image_to_insert = P_THIS->m_next_disc_index.value_or(0);
     Log_DevPrintf("Inserting image %u", image_to_insert);
-    return System::SwitchMediaFromPlaylist(image_to_insert);
+    return System::SwitchMediaSubImage(image_to_insert);
   }
 }
 
@@ -1420,7 +1420,7 @@ unsigned LibretroHostInterface::DiskControlGetImageIndex()
     return false;
   }
 
-  const u32 index = P_THIS->m_next_disc_index.value_or(System::GetMediaPlaylistIndex());
+  const u32 index = P_THIS->m_next_disc_index.value_or(System::GetMediaSubImageIndex());
   Log_DevPrintf("DiskControlGetImageIndex() -> %u", index);
   return index;
 }
@@ -1435,7 +1435,7 @@ bool LibretroHostInterface::DiskControlSetImageIndex(unsigned index)
 
   Log_DevPrintf("DiskControlSetImageIndex(%u)", index);
 
-  if (index >= System::GetMediaPlaylistCount())
+  if (index >= System::GetMediaSubImageCount())
     return false;
 
   P_THIS->m_next_disc_index = index;
@@ -1450,37 +1450,37 @@ unsigned LibretroHostInterface::DiskControlGetNumImages()
     return false;
   }
 
-  Log_DevPrintf("DiskControlGetNumImages() -> %u", System::GetMediaPlaylistCount());
-  return static_cast<unsigned>(System::GetMediaPlaylistCount());
+  Log_DevPrintf("DiskControlGetNumImages() -> %u", System::GetMediaSubImageCount());
+  return static_cast<unsigned>(System::GetMediaSubImageCount());
 }
 
-bool LibretroHostInterface::DiskControlReplaceImageIndex(unsigned index, const retro_game_info* info)
-{
-  if (System::IsShutdown())
-  {
-    Log_ErrorPrintf("DiskControlReplaceImageIndex() - no system");
-    return false;
-  }
+// bool LibretroHostInterface::DiskControlReplaceImageIndex(unsigned index, const retro_game_info* info)
+// {
+//   if (System::IsShutdown())
+//   {
+//     Log_ErrorPrintf("DiskControlReplaceImageIndex() - no system");
+//     return false;
+//   }
 
-  Log_DevPrintf("DiskControlReplaceImageIndex(%u, %s)", index, info ? info->path : "null");
-  if (info && info->path)
-    return System::ReplaceMediaPathFromPlaylist(index, info->path);
-  else
-    return System::RemoveMediaPathFromPlaylist(index);
-}
+//   Log_DevPrintf("DiskControlReplaceImageIndex(%u, %s)", index, info ? info->path : "null");
+//   if (info && info->path)
+//     return System::ReplaceMediaPathFromPlaylist(index, info->path);
+//   else
+//     return System::RemoveMediaPathFromPlaylist(index);
+// }
 
-bool LibretroHostInterface::DiskControlAddImageIndex()
-{
-  if (System::IsShutdown())
-  {
-    Log_ErrorPrintf("DiskControlAddImageIndex() - no system");
-    return false;
-  }
+// bool LibretroHostInterface::DiskControlAddImageIndex()
+// {
+//   if (System::IsShutdown())
+//   {
+//     Log_ErrorPrintf("DiskControlAddImageIndex() - no system");
+//     return false;
+//   }
 
-  Log_DevPrintf("DiskControlAddImageIndex() -> %u", System::GetMediaPlaylistCount());
-  System::AddMediaPathToPlaylist({});
-  return true;
-}
+//   Log_DevPrintf("DiskControlAddImageIndex() -> %u", System::GetMediaSubImageCount());
+//   System::AddMediaPathToPlaylist({});
+//   return true;
+// }
 
 bool LibretroHostInterface::DiskControlSetInitialImage(unsigned index, const char* path)
 {
@@ -1491,10 +1491,10 @@ bool LibretroHostInterface::DiskControlSetInitialImage(unsigned index, const cha
 
 bool LibretroHostInterface::DiskControlGetImagePath(unsigned index, char* path, size_t len)
 {
-  if (System::IsShutdown() || index >= System::GetMediaPlaylistCount())
+  if (System::IsShutdown() || index >= System::GetMediaSubImageCount())
     return false;
 
-  const std::string& image_path = System::GetMediaPlaylistPath(index);
+  const std::string& image_path = System::GetMediaSubImageTitle(index);
   Log_DevPrintf("DiskControlGetImagePath(%u) -> %s", index, image_path.c_str());
   if (image_path.empty())
     return false;
@@ -1505,10 +1505,10 @@ bool LibretroHostInterface::DiskControlGetImagePath(unsigned index, char* path, 
 
 bool LibretroHostInterface::DiskControlGetImageLabel(unsigned index, char* label, size_t len)
 {
-  if (System::IsShutdown() || index >= System::GetMediaPlaylistCount())
+  if (System::IsShutdown() || index >= System::GetMediaSubImageCount())
     return false;
 
-  const std::string& image_path = System::GetMediaPlaylistPath(index);
+  const std::string& image_path = System::GetMediaSubImageTitle(index);
   if (image_path.empty())
     return false;
 
@@ -1526,8 +1526,8 @@ void LibretroHostInterface::InitDiskControlInterface()
     retro_disk_control_ext_callback ext_cb = {
       &LibretroHostInterface::DiskControlSetEjectState, &LibretroHostInterface::DiskControlGetEjectState,
       &LibretroHostInterface::DiskControlGetImageIndex, &LibretroHostInterface::DiskControlSetImageIndex,
-      &LibretroHostInterface::DiskControlGetNumImages,  &LibretroHostInterface::DiskControlReplaceImageIndex,
-      &LibretroHostInterface::DiskControlAddImageIndex, &LibretroHostInterface::DiskControlSetInitialImage,
+      &LibretroHostInterface::DiskControlGetNumImages,  NULL,
+      NULL, &LibretroHostInterface::DiskControlSetInitialImage,
       &LibretroHostInterface::DiskControlGetImagePath,  &LibretroHostInterface::DiskControlGetImageLabel};
     if (g_retro_environment_callback(RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE, &ext_cb))
       return;
@@ -1536,8 +1536,8 @@ void LibretroHostInterface::InitDiskControlInterface()
   retro_disk_control_callback cb = {
     &LibretroHostInterface::DiskControlSetEjectState, &LibretroHostInterface::DiskControlGetEjectState,
     &LibretroHostInterface::DiskControlGetImageIndex, &LibretroHostInterface::DiskControlSetImageIndex,
-    &LibretroHostInterface::DiskControlGetNumImages,  &LibretroHostInterface::DiskControlReplaceImageIndex,
-    &LibretroHostInterface::DiskControlAddImageIndex};
+    &LibretroHostInterface::DiskControlGetNumImages,  NULL,
+    NULL};
   if (!g_retro_environment_callback(RETRO_ENVIRONMENT_SET_DISK_CONTROL_INTERFACE, &cb))
     Log_WarningPrint("Failed to set disk control interface");
 }
