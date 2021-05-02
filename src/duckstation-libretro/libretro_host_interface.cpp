@@ -106,7 +106,7 @@ bool LibretroHostInterface::Initialize()
   FixIncompatibleSettings(true);
   UpdateLogging();
 
-  m_last_aspect_ratio = Settings::GetDisplayAspectRatioValue(g_settings.display_aspect_ratio);
+  m_last_aspect_ratio = g_settings.GetDisplayAspectRatioValue();
   return true;
 }
 
@@ -136,7 +136,7 @@ bool LibretroHostInterface::ConfirmMessage(const char* message)
 void LibretroHostInterface::GetGameInfo(const char* path, CDImage* image, std::string* code, std::string* title)
 {
   // Just use the filename for now... we don't have the game list. Unless we can pull this from the frontend somehow?
-  *title = System::GetTitleForPath(path);
+  *title = FileSystem::GetFileTitleFromPath(path);
   *code = System::GetGameCodeForImage(image, true);
 }
 
@@ -1512,7 +1512,7 @@ bool LibretroHostInterface::DiskControlGetImageLabel(unsigned index, char* label
   if (image_path.empty())
     return false;
 
-  const std::string_view title = System::GetTitleForPath(label);
+  const std::string_view title = FileSystem::GetFileTitleFromPath(label);
   StringUtil::Strlcpy(label, title, len);
   Log_DevPrintf("DiskControlGetImagePath(%u) -> %s", index, label);
   return true;
