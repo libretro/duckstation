@@ -11,6 +11,7 @@
 #include "core/digital_controller.h"
 #include "core/gpu.h"
 #include "core/system.h"
+#include "core/pad.h"
 #include "libretro_audio_stream.h"
 #include "libretro_game_settings.h"
 #include "libretro_host_display.h"
@@ -494,6 +495,13 @@ void* LibretroHostInterface::retro_get_memory_data(unsigned id)
     case RETRO_MEMORY_SYSTEM_RAM:
       return System::IsShutdown() ? nullptr : Bus::g_ram;
 
+    case RETRO_MEMORY_SAVE_RAM: {
+      auto card = g_pad.GetMemoryCard(0);
+      auto& data = card->GetData();
+      return data.data();
+      break;
+    }
+
     default:
       return nullptr;
   }
@@ -505,6 +513,9 @@ size_t LibretroHostInterface::retro_get_memory_size(unsigned id)
   {
     case RETRO_MEMORY_SYSTEM_RAM:
       return Bus::RAM_SIZE;
+
+    case RETRO_MEMORY_SAVE_RAM:
+      return 128 * 1024;
 
     default:
       return 0;

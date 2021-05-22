@@ -1766,68 +1766,8 @@ void ResetControllers()
 
 void UpdateMemoryCards()
 {
-  for (u32 i = 0; i < NUM_CONTROLLER_AND_CARD_PORTS; i++)
-  {
-    g_pad.SetMemoryCard(i, nullptr);
-
-    std::unique_ptr<MemoryCard> card;
-    const MemoryCardType type = g_settings.memory_card_types[i];
-    switch (type)
-    {
-      case MemoryCardType::None:
-        continue;
-
-      case MemoryCardType::PerGame:
-      {
-        if (s_running_game_code.empty())
-        {
-          g_host_interface->AddFormattedOSDMessage(
-            5.0f,
-            g_host_interface->TranslateString("System",
-                                              "Per-game memory card cannot be used for slot %u as the running "
-                                              "game has no code. Using shared card instead."),
-            i + 1u);
-          card = MemoryCard::Open(g_host_interface->GetSharedMemoryCardPath(i));
-        }
-        else
-        {
-          card = MemoryCard::Open(g_host_interface->GetGameMemoryCardPath(s_running_game_code.c_str(), i));
-        }
-      }
-      break;
-
-      case MemoryCardType::PerGameTitle:
-      {
-        if (s_running_game_title.empty())
-        {
-          g_host_interface->AddFormattedOSDMessage(
-            5.0f,
-            g_host_interface->TranslateString("System",
-                                              "Per-game memory card cannot be used for slot %u as the running "
-                                              "game has no title. Using shared card instead."),
-            i + 1u);
-          card = MemoryCard::Open(g_host_interface->GetSharedMemoryCardPath(i));
-        }
-        else
-        {
-          card = MemoryCard::Open(g_host_interface->GetGameMemoryCardPath(s_running_game_title.c_str(), i));
-        }
-      }
-      break;
-
-      case MemoryCardType::Shared:
-      {
-        if (g_settings.memory_card_paths[i].empty())
-          card = MemoryCard::Open(g_host_interface->GetSharedMemoryCardPath(i));
-        else
-          card = MemoryCard::Open(g_settings.memory_card_paths[i]);
-      }
-      break;
-    }
-
-    if (card)
-      g_pad.SetMemoryCard(i, std::move(card));
-  }
+  std::unique_ptr<MemoryCard> card = MemoryCard::Create();
+  g_pad.SetMemoryCard(0, std::move(card));
 }
 
 void UpdateMultitaps()
