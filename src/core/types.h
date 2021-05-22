@@ -140,6 +140,7 @@ enum class MemoryCardType
   Shared,
   PerGame,
   PerGameTitle,
+  Libretro,
   Count
 };
 
