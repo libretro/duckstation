@@ -7,7 +7,7 @@
 # Core definitions
 .core-defs:
   variables:
-    CORENAME: duckstation
+    CORENAME: swanstation
     CORE_ARGS: -DBUILD_LIBRETRO_CORE=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_CHEEVOS=OFF
     API_LEVEL: 24
 
