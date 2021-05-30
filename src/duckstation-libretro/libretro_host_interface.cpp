@@ -58,12 +58,13 @@ LibretroHostInterface::LibretroHostInterface() = default;
 
 LibretroHostInterface::~LibretroHostInterface()
 {
-  // should be cleaned up by the context destroy, but just in case
-  if (m_hw_render_display)
-  {
-    m_hw_render_display->DestroyRenderDevice();
-    m_hw_render_display.reset();
-  }
+  // a few things we are safe to cleanup because these pointers are garaunteed to be initialized to zero (0)
+  // when the shared library (dll/so) is loaded into memory. Other things are not safe, such as calling
+  // HostInterface::Shutdown, because it depends on a bunch of vars being initialized to zero at runtime,
+  // otherwise it thinks it needs to clean them up and they're actually invalid, and crashes happen.
+
+  m_audio_stream.reset();   // assert checks will expect this is nullified.
+  ReleaseHostDisplay();     // assert checks will expect this is nullified.
 }
 
 void LibretroHostInterface::retro_set_environment()
@@ -558,10 +559,14 @@ void LibretroHostInterface::ReleaseHostDisplay()
   {
     m_hw_render_display->DestroyRenderDevice();
     m_hw_render_display.reset();
+    m_using_hardware_renderer = false;
   }
 
-  m_display->DestroyRenderDevice();
-  m_display.reset();
+  if (m_display)
+  {
+    m_display->DestroyRenderDevice();
+    m_display.reset();
+  }
 }
 
 std::unique_ptr<AudioStream> LibretroHostInterface::CreateAudioStream(AudioBackend backend)
@@ -572,7 +577,6 @@ std::unique_ptr<AudioStream> LibretroHostInterface::CreateAudioStream(AudioBacke
 void LibretroHostInterface::OnSystemDestroyed()
 {
   HostInterface::OnSystemDestroyed();
-  m_using_hardware_renderer = false;
 }
 
 static std::array<retro_core_option_definition, 64> s_option_definitions = {{
