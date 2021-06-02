@@ -984,7 +984,12 @@ static std::array<retro_core_option_definition, 64> s_option_definitions = {{
    "Uses page faults to determine hardware memory accesses at runtime. Can provide a significant performance "
    "improvement in some games, but make the core more difficult to debug.",
    {{"Disabled", "Disabled (Slowest)"}, {"MMap", "MMap (Hardware, Fastest, 64-Bit Only)"}, {"LUT", "LUT (Faster)"}},
-   "LUT"},
+#if defined(CPU_X64) || defined(CPU_AARCH64)
+   "MMap"
+#else
+   "LUT"
+#endif
+  },
   {"duckstation_Display.ActiveStartOffset",
    "Display Active Start Offset",
    "Pads or crops off lines from the left of the displayed image.",
